@@ -1,0 +1,87 @@
+<Page
+    x:Class="BlueScreenHelper.Views.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Loaded="Page_Loaded">
+
+    <Page.Resources>
+        <Style x:Key="CardStyle" TargetType="Border">
+            <Setter Property="Background" Value="{ThemeResource LayerFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="16" />
+        </Style>
+        <Style x:Key="FieldLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+            <Setter Property="Margin" Value="0,10,0,4" />
+        </Style>
+    </Page.Resources>
+
+    <ScrollViewer>
+        <StackPanel Padding="24,16,24,24" Spacing="14">
+            <TextBlock Text="设置" FontSize="28" FontWeight="Bold" />
+            <TextBlock Text="配置 AI 服务接口，用于崩溃分析与系统诊断。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+            <Border Style="{StaticResource CardStyle}">
+                <StackPanel>
+                    <TextBlock Text="AI 服务配置" FontSize="18" FontWeight="SemiBold" />
+                    <TextBlock Style="{StaticResource FieldLabel}" Text="接口地址 (Base URL) — 支持任意 OpenAI 兼容接口" />
+                    <TextBox x:Name="BaseUrlBox" PlaceholderText="https://api.openai.com/v1" />
+                    <TextBlock Style="{StaticResource FieldLabel}" Text="API Key" />
+                    <PasswordBox x:Name="ApiKeyBox" PlaceholderText="sk-..." />
+                    <TextBlock Style="{StaticResource FieldLabel}" Text="模型名称" />
+                    <ComboBox x:Name="ModelBox" IsEditable="True" Width="300" HorizontalAlignment="Left" />
+                    <TextBlock Style="{StaticResource FieldLabel}" Text="温度（0-1，越低越严谨）" />
+                    <Slider x:Name="TempSlider" Minimum="0" Maximum="1" StepFrequency="0.05" Width="300" HorizontalAlignment="Left" />
+                    <TextBlock Style="{StaticResource FieldLabel}" Text="系统提示词（AI 的角色与回答要求）" />
+                    <TextBox x:Name="PromptBox" AcceptsReturn="True" TextWrapping="Wrap" Height="160"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto" />
+                    <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,14,0,0">
+                        <Button x:Name="SaveButton" Click="Save_Click" Style="{StaticResource AccentButtonStyle}">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <SymbolIcon Symbol="Save" />
+                                <TextBlock Text="保存配置" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="TestButton" Click="Test_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <SymbolIcon Symbol="Play" />
+                                <TextBlock Text="测试连接" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <ProgressRing x:Name="TestRing" IsActive="False" Width="22" Height="22" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <InfoBar x:Name="SaveBar" IsOpen="False" Margin="0,12,0,0" />
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardStyle}">
+                <StackPanel>
+                    <TextBlock Text="支持的 AI 接口（OpenAI 兼容）" FontSize="18" FontWeight="SemiBold" />
+                    <TextBlock Text="在接口地址处填入对应服务的 Base URL 即可："
+                               Margin="0,8,0,4" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBlock Text="• OpenAI：https://api.openai.com/v1" TextWrapping="Wrap" />
+                    <TextBlock Text="• DeepSeek：https://api.deepseek.com/v1（模型 deepseek-chat）" TextWrapping="Wrap" />
+                    <TextBlock Text="• 智谱 AI：https://open.bigmodel.cn/api/paas/v4（模型 glm-4-flash / glm-4-plus）" TextWrapping="Wrap" />
+                    <TextBlock Text="• Moonshot：https://api.moonshot.cn/v1（模型 moonshot-v1-8k）" TextWrapping="Wrap" />
+                    <TextBlock Text="• 通义千问：https://dashscope.aliyuncs.com/compatible-mode/v1（模型 qwen-plus）" TextWrapping="Wrap" />
+                    <TextBlock Text="• SiliconFlow：https://api.siliconflow.cn/v1（模型 Qwen/Qwen2.5-7B-Instruct）" TextWrapping="Wrap" />
+                    <TextBlock Text="• Ollama 本地：http://localhost:11434/v1（模型如 llama3.1）" TextWrapping="Wrap" />
+                    <TextBlock Text="• vLLM / LM Studio 等本地服务：填写对应 OpenAI 兼容地址" TextWrapping="Wrap" />
+                    <TextBlock Text="配置保存位置：%LOCALAPPDATA%\BlueScreenHelper\settings.json（仅保存在本机，不会上传）"
+                               Margin="0,10,0,0" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardStyle}">
+                <StackPanel>
+                    <TextBlock Text="关于" FontSize="18" FontWeight="SemiBold" />
+                    <TextBlock Text="蓝屏诊断助手 v1.0 — WinUI 3" Margin="0,8,0,0" />
+                    <TextBlock Text="功能：.dmp 转储解析 · 崩溃代码知识库 · 系统关键路径扫描 · AI 智能诊断" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                    <TextBlock Text="注意：本工具为辅助诊断软件，AI 提供的内容仅供参考，重大操作（如格式化、更换硬件）请谨慎执行。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" Margin="0,8,0,0" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

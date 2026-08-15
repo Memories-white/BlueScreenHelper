@@ -1,0 +1,24 @@
+## .NET / Visual Studio
+bin/
+obj/
+*.user
+*.suo
+.vs/
+.vscode/
+AppPackages/
+BundleArtifacts/
+
+## WinUI / msix
+*.msix
+*.msixbundle
+*.appx
+*.appxbundle
+*.pri
+
+## Test results
+TestResults/
+*.trx
+
+## IDE
+.idea/
+*.swp

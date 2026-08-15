@@ -1,0 +1,146 @@
+<Page
+    x:Class="BlueScreenHelper.Views.DumpPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:models="using:BlueScreenHelper.Models">
+
+    <Page.Resources>
+        <Style x:Key="CardStyle" TargetType="Border">
+            <Setter Property="Background" Value="{ThemeResource LayerFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="16" />
+        </Style>
+    </Page.Resources>
+
+    <ScrollViewer>
+        <StackPanel Padding="24,16,24,24" Spacing="14">
+
+            <TextBlock Text="转储文件分析" FontSize="28" FontWeight="Bold" />
+            <TextBlock Text="选择 Windows 崩溃转储文件（.dmp，通常位于 C:\Windows\Minidump），解析错误代码、故障模块并给出解决方案。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+
+            <StackPanel Orientation="Horizontal" Spacing="12">
+                <Button x:Name="PickButton" Click="PickFile_Click" Style="{StaticResource AccentButtonStyle}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <SymbolIcon Symbol="OpenFile" />
+                        <TextBlock Text="选择 .dmp 文件" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+                <Button x:Name="AiButton" IsEnabled="False" Click="AiDiagnose_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <SymbolIcon Symbol="Comment" />
+                        <TextBlock Text="AI 智能诊断" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+                <Button x:Name="CopyButton" IsEnabled="False" Click="CopyReport_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <SymbolIcon Symbol="Copy" />
+                        <TextBlock Text="复制分析报告" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+
+            <TextBlock x:Name="FilePathText" Text="尚未选择文件" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+
+            <InfoBar x:Name="StatusBar" IsOpen="False" />
+
+            <Border x:Name="ResultPanel" Visibility="Collapsed" Style="{StaticResource CardStyle}">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="崩溃信息" FontSize="18" FontWeight="SemiBold" />
+                    <Grid ColumnSpacing="16" RowSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" MinWidth="96" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition />
+                            <RowDefinition />
+                            <RowDefinition />
+                            <RowDefinition />
+                            <RowDefinition />
+                            <RowDefinition />
+                            <RowDefinition />
+                            <RowDefinition />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Text="错误代码" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Top" Margin="0,6,0,0" />
+                        <TextBlock Grid.Column="1" x:Name="CodeText" FontFamily="Consolas" FontSize="22" FontWeight="Bold" Foreground="#E81123" TextWrapping="Wrap" />
+
+                        <TextBlock Grid.Row="1" Text="错误名称" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Top" Margin="0,6,0,0" />
+                        <TextBlock Grid.Row="1" Grid.Column="1" x:Name="NameText" TextWrapping="Wrap" FontWeight="SemiBold" />
+
+                        <TextBlock Grid.Row="2" Text="故障类别" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Top" Margin="0,6,0,0" />
+                        <TextBlock Grid.Row="2" Grid.Column="1" x:Name="CategoryText" TextWrapping="Wrap" />
+
+                        <TextBlock Grid.Row="3" Text="疑似故障模块" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Top" Margin="0,6,0,0" />
+                        <TextBlock Grid.Row="3" Grid.Column="1" x:Name="ModuleText" FontFamily="Consolas" TextWrapping="Wrap" />
+
+                        <TextBlock Grid.Row="4" Text="崩溃时间" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Top" Margin="0,6,0,0" />
+                        <TextBlock Grid.Row="4" Grid.Column="1" x:Name="TimeText" />
+
+                        <TextBlock Grid.Row="5" Text="系统版本" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Top" Margin="0,6,0,0" />
+                        <TextBlock Grid.Row="5" Grid.Column="1" x:Name="OsText" TextWrapping="Wrap" />
+
+                        <TextBlock Grid.Row="6" Text="转储类型 / 进程" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Top" Margin="0,6,0,0" />
+                        <TextBlock Grid.Row="6" Grid.Column="1" x:Name="MiscText" TextWrapping="Wrap" />
+
+                        <TextBlock Grid.Row="7" Text="异常信息" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Top" Margin="0,6,0,0" />
+                        <TextBlock Grid.Row="7" Grid.Column="1" x:Name="ExText" TextWrapping="Wrap" FontFamily="Consolas" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <Expander x:Name="ParamsExpander" Visibility="Collapsed" HorizontalAlignment="Stretch">
+                <Expander.Header>
+                    <TextBlock Text="崩溃参数 (BugCheck Parameters)" FontWeight="SemiBold" />
+                </Expander.Header>
+                <StackPanel Spacing="4">
+                    <TextBlock x:Name="ParamsText" FontFamily="Consolas" TextWrapping="Wrap" />
+                </StackPanel>
+            </Expander>
+
+            <Expander x:Name="KnowledgeExpander" Visibility="Collapsed" HorizontalAlignment="Stretch">
+                <Expander.Header>
+                    <TextBlock Text="问题定位与解决方案" FontWeight="SemiBold" />
+                </Expander.Header>
+                <StackPanel Spacing="12">
+                    <StackPanel>
+                        <TextBlock FontWeight="SemiBold" Text="问题描述" />
+                        <TextBlock x:Name="DescText" TextWrapping="Wrap" Margin="0,6,0,0" />
+                    </StackPanel>
+                    <StackPanel>
+                        <TextBlock FontWeight="SemiBold" Text="常见原因" />
+                        <ItemsControl x:Name="CausesList" Margin="0,6,0,0" />
+                    </StackPanel>
+                    <StackPanel>
+                        <TextBlock FontWeight="SemiBold" Text="解决方案（按优先级）" />
+                        <ItemsControl x:Name="SolutionsList" Margin="0,6,0,0" />
+                    </StackPanel>
+                </StackPanel>
+            </Expander>
+
+            <Expander x:Name="ModulesExpander" Visibility="Collapsed" HorizontalAlignment="Stretch">
+                <Expander.Header>
+                    <TextBlock Text="已加载模块" FontWeight="SemiBold" />
+                </Expander.Header>
+                <ListView x:Name="ModulesList" MaxHeight="360" SelectionMode="None">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="models:DumpModule">
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="180" />
+                                    <ColumnDefinition Width="180" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{x:Bind Name}" FontFamily="Consolas" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Grid.Column="1" Text="{x:Bind BaseAddress}" FontFamily="Consolas" />
+                                <TextBlock Grid.Column="2" Text="{x:Bind Size}" FontFamily="Consolas" />
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </Expander>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

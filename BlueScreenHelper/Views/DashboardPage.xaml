@@ -1,0 +1,123 @@
+<Page
+    x:Class="BlueScreenHelper.Views.DashboardPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:models="using:BlueScreenHelper.Models"
+    Loaded="Page_Loaded">
+
+    <Page.Resources>
+        <Style x:Key="CardStyle" TargetType="Border">
+            <Setter Property="Background" Value="{ThemeResource LayerFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="16" />
+        </Style>
+        <Style x:Key="CardTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="18" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+        </Style>
+    </Page.Resources>
+
+    <ScrollViewer>
+        <StackPanel Padding="24,16,24,24" Spacing="14">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="蓝屏诊断助手" FontSize="28" FontWeight="Bold" />
+                    <TextBlock Text="分析 .dmp 崩溃转储 · 扫描系统问题 · AI 智能诊断" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="0,4,0,0" />
+                </StackPanel>
+                <Button Grid.Column="1" Click="Refresh_Click" VerticalAlignment="Center">
+                    <Button.Content>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <SymbolIcon Symbol="Refresh" />
+                            <TextBlock Text="刷新" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button.Content>
+                </Button>
+            </Grid>
+
+            <InfoBar x:Name="WelcomeBar" IsOpen="True" Severity="Informational"
+                     Title="欢迎使用"
+                     Message="选择左侧“转储分析”可解析 .dmp 崩溃文件；点击“系统扫描”可自动检查事件日志、驱动、磁盘与内存健康，并使用 AI 获取解决方案。" />
+
+            <Grid ColumnSpacing="14" RowSpacing="14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource CardTitle}" Text="系统信息" />
+                        <TextBlock x:Name="SysText" Text="加载中..." TextWrapping="Wrap" LineHeight="24" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="0" Grid.Column="1" Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource CardTitle}" Text="崩溃概况" />
+                        <TextBlock x:Name="CrashText" Text="加载中..." TextWrapping="Wrap" LineHeight="24" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource CardStyle}">
+                    <StackPanel Spacing="8">
+                        <TextBlock Style="{StaticResource CardTitle}" Text="快速操作" />
+                        <Button HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Click="OpenDump_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <SymbolIcon Symbol="Document" />
+                                <TextBlock Text="打开转储文件分析" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Click="OpenScanner_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <SymbolIcon Symbol="Repair" />
+                                <TextBlock Text="开始系统全面扫描" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource CardStyle}">
+                    <StackPanel Spacing="8">
+                        <TextBlock Style="{StaticResource CardTitle}" Text="使用建议" />
+                        <TextBlock Text="1. 蓝屏后先在“转储分析”解析 C:\Windows\Minidump 下的 .dmp 文件" TextWrapping="Wrap" />
+                        <TextBlock Text="2. 在“设置”中填入 AI API 配置，让 AI 给出针对性解决方案" TextWrapping="Wrap" />
+                        <TextBlock Text="3. 使用“系统扫描”检查驱动、磁盘、内存等潜在问题" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Expander x:Name="CrashExpander" IsExpanded="False" HorizontalAlignment="Stretch">
+                <Expander.Header>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE7BA;" />
+                        <TextBlock Text="最近蓝屏崩溃记录（30 天）" FontWeight="SemiBold" />
+                    </StackPanel>
+                </Expander.Header>
+                <ListView x:Name="CrashList" MaxHeight="320" DoubleTapped="CrashList_DoubleTapped">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="models:DashboardCrashItem">
+                            <StackPanel Padding="0,6">
+                                <StackPanel Orientation="Horizontal" Spacing="10">
+                                    <TextBlock FontWeight="SemiBold" Text="{x:Bind Code}" />
+                                    <TextBlock Text="{x:Bind Summary}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                </StackPanel>
+                                <TextBlock Text="双击查看详情与解决方案" FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Margin="0,2,0,0" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </Expander>
+        </StackPanel>
+    </ScrollViewer>
+</Page>
