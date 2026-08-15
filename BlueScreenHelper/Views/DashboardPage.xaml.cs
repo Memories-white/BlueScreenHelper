@@ -27,6 +27,11 @@ public sealed partial class DashboardPage : Page
         await RefreshAsync();
     }
 
+    public void ShowWelcomeBar()
+    {
+        WelcomeBar.IsOpen = true;
+    }
+
     private async void Refresh_Click(object sender, RoutedEventArgs e)
     {
         await RefreshAsync();

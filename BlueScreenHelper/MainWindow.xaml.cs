@@ -50,8 +50,16 @@ public sealed partial class MainWindow : Window
                 break;
             }
         }
-        if (_pages.TryGetValue(tag, out var type) && ContentFrame.CurrentSourcePageType != type)
+        if (_pages.TryGetValue(tag, out var type))
         {
+            if (ContentFrame.CurrentSourcePageType == type)
+            {
+                if (ContentFrame.Content is DashboardPage dp)
+                {
+                    dp.ShowWelcomeBar();
+                }
+                return;
+            }
             ContentFrame.Navigate(type);
         }
     }
@@ -60,8 +68,16 @@ public sealed partial class MainWindow : Window
     {
         if (args.SelectedItem is NavigationViewItem item && item.Tag is string tag)
         {
-            if (_pages.TryGetValue(tag, out var type) && ContentFrame.CurrentSourcePageType != type)
+            if (_pages.TryGetValue(tag, out var type))
             {
+                if (ContentFrame.CurrentSourcePageType == type)
+                {
+                    if (ContentFrame.Content is DashboardPage dp)
+                    {
+                        dp.ShowWelcomeBar();
+                    }
+                    return;
+                }
                 ContentFrame.Navigate(type);
             }
         }

@@ -50,6 +50,10 @@ public static class SystemScanner
                 snap.OSName = (key.GetValue("ProductName") as string) ?? "Windows";
                 snap.Edition = (key.GetValue("EditionID") as string) ?? "";
                 snap.Build = (key.GetValue("CurrentBuildNumber") as string) ?? "";
+                if (int.TryParse(snap.Build, out var buildNum) && buildNum >= 22000)
+                {
+                    snap.OSName = snap.OSName.Replace("Windows 10", "Windows 11");
+                }
                 var ubr = key.GetValue("UBR");
                 snap.OSVersion = $"{(key.GetValue("DisplayVersion") as string ?? "")} (Build {snap.Build}.{(ubr?.ToString() ?? "0")})";
             }
