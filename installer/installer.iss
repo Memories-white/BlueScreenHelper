@@ -1,6 +1,6 @@
 ﻿; BlueScreenHelper installer script
 #define MyAppName "蓝屏诊断助手 BlueScreenHelper"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.2"
 #define MyAppExeName "BlueScreenHelper.exe"
 #define MyAppPublisher "Memories-white"
 #define MyAppURL "https://github.com/Memories-white/BlueScreenHelper"
