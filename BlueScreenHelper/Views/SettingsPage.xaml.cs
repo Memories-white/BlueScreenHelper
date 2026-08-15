@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using BlueScreenHelper.Models;
 using BlueScreenHelper.Services;
 using Microsoft.UI.Xaml;
@@ -250,6 +251,21 @@ public sealed partial class SettingsPage : Page
         _ => "1（发散多样：创意更强，但可能不够稳定）"
     };
 
+    private void OpenLogFolder_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{AppLogger.LogDir}\"")
+            {
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            ShowBar(InfoBarSeverity.Error, "无法打开日志文件夹", ex.Message);
+        }
+    }
+
     private async void CheckUpdate_Click(object sender, RoutedEventArgs e)
     {
         CheckUpdateButton.IsEnabled = false;
@@ -307,9 +323,25 @@ public sealed partial class SettingsPage : Page
             var path = await UpdaterService.DownloadAsync(info.InstallerUrl,
                 new Progress<double>(p => DownloadBar.Value = p));
 
-            UpdateText.Text = "正在启动安装程序，完成后请重新打开应用。";
+            UpdateText.Text = "下载完成，等待确认…";
+            var installDlg = new ContentDialog
+            {
+                Title = "安装包已下载",
+                Content = "即将退出本应用并启动安装向导。\n安装完成后将自动打开新版本。",
+                PrimaryButtonText = "开始安装",
+                CloseButtonText = "稍后安装",
+                DefaultButton = ContentDialogButton.Primary,
+                XamlRoot = XamlRoot
+            };
+            if (await installDlg.ShowAsync() != ContentDialogResult.Primary)
+            {
+                UpdateText.Text = "安装包已下载到临时目录，可稍后手动运行安装。";
+                return;
+            }
+
+            UpdateText.Text = "正在启动安装向导，本应用即将关闭。";
             UpdaterService.LaunchInstaller(path);
-            await Task.Delay(800);
+            await Task.Delay(1500);
             App.MainWindow?.Close();
         }
         catch (Exception ex)

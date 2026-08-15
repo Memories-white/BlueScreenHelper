@@ -22,6 +22,7 @@ public static class AiToolLog
 
     public static void Add(string toolName, string action, bool success, string resultPreview)
     {
+        AppLogger.LogInfo($"AI工具调用: [{toolName}] {action} {(success ? "成功" : "失败")}");
         var queue = App.MainWindow?.DispatcherQueue;
         var entry = new AiToolLogEntry
         {

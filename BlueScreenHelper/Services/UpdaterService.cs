@@ -98,7 +98,7 @@ public static class UpdaterService
         Process.Start(new ProcessStartInfo
         {
             FileName = installerPath,
-            Arguments = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART",
+            Arguments = "/NORESTART",
             UseShellExecute = true
         });
     }

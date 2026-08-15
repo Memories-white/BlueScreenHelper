@@ -116,6 +116,12 @@
                     <TextBlock Text="功能：.dmp 转储解析 · 崩溃代码知识库 · 系统关键路径扫描 · AI 智能诊断" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" Margin="0,8,0,0" />
                     <TextBlock Text="注意：本工具为辅助诊断软件，AI 提供的内容仅供参考，重大操作（如格式化、更换硬件）请谨慎执行。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" Margin="0,8,0,0" />
                     <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,12,0,0">
+                        <Button x:Name="OpenLogButton" Click="OpenLogFolder_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <SymbolIcon Symbol="OpenFile" />
+                                <TextBlock Text="打开日志文件夹" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
                         <Button x:Name="CheckUpdateButton" Click="CheckUpdate_Click">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <SymbolIcon Symbol="Download" />

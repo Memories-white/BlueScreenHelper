@@ -1,3 +1,4 @@
+using BlueScreenHelper.Services;
 using Microsoft.UI.Xaml;
 using WinRT.Interop;
 
@@ -17,6 +18,7 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        AppLogger.Init();
         MainWindow = new MainWindow();
         MainWindow.Activate();
     }

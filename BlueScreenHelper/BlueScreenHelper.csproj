@@ -27,4 +27,8 @@
   <ItemGroup>
     <Content Include="Assets\app.ico" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <Target Name="TrimMuxLanguageFolders" AfterTargets="Build" Condition="'$(OS)' == 'Windows_NT'">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;Get-ChildItem -LiteralPath '$(OutDir)' -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin @('zh-CN','en-us','Microsoft.UI.Xaml','runtimes','Assets') } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue&quot;" />
+  </Target>
 </Project>

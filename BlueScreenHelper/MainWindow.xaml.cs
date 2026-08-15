@@ -31,7 +31,17 @@ public sealed partial class MainWindow : Window
             if (File.Exists(iconPath))
             {
                 AppWindow.SetIcon(iconPath);
+                AppTitleIcon.Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(iconPath));
             }
+        }
+        catch
+        {
+        }
+        ExtendsContentIntoTitleBar = true;
+        try
+        {
+            AppWindow.TitleBar.PreferredHeightOption = Microsoft.UI.Windowing.TitleBarHeightOption.Standard;
+            SetTitleBar(AppTitleBar);
         }
         catch
         {
