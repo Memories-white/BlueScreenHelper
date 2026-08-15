@@ -25,6 +25,17 @@ public sealed partial class MainWindow : Window
         catch
         {
         }
+        try
+        {
+            var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico");
+            if (File.Exists(iconPath))
+            {
+                AppWindow.SetIcon(iconPath);
+            }
+        }
+        catch
+        {
+        }
         NavView.SelectedItem = NavView.MenuItems[0];
         ContentFrame.Navigate(_pages["dashboard"]);
     }

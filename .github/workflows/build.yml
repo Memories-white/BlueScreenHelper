@@ -1,0 +1,68 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build (x64 Release)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore & build
+        run: dotnet build BlueScreenHelper/BlueScreenHelper.csproj -c Release
+
+  package:
+    name: Package installer (tag only)
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish self-contained (win-x64)
+        run: dotnet publish BlueScreenHelper/BlueScreenHelper.csproj -c Release -r win-x64 --self-contained true -o publish/win-x64
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Patch version from git tag
+        shell: pwsh
+        run: |
+          $ver = $env:GITHUB_REF -replace 'refs/tags/v', ''
+          $iss = Get-Content installer/installer.iss -Raw
+          $iss = $iss -replace '#define MyAppVersion "[^"]*"', "#define MyAppVersion `"$ver`""
+          [System.IO.File]::WriteAllText("installer/installer.iss", $iss, (New-Object System.Text.UTF8Encoding($true)))
+
+      - name: Compile installer with ISCC
+        shell: pwsh
+        run: |
+          $iscc = Get-ChildItem "C:\Program Files*\Inno Setup*\ISCC.exe" -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $iscc) { throw 'ISCC.exe not found' }
+          & $iscc installer/installer.iss
+          if ($LASTEXITCODE -ne 0) { throw 'ISCC compile failed' }
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.exe
+          overwrite: true

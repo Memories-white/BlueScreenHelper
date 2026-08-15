@@ -1,6 +1,6 @@
 ﻿; BlueScreenHelper installer script
 #define MyAppName "蓝屏诊断助手 BlueScreenHelper"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.1"
 #define MyAppExeName "BlueScreenHelper.exe"
 #define MyAppPublisher "Memories-white"
 #define MyAppURL "https://github.com/Memories-white/BlueScreenHelper"
@@ -29,11 +29,11 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#MyAppExeName}
 PrivilegesRequired=admin
-SetupIconFile=
+SetupIconFile=..\BlueScreenHelper\Assets\app.ico
 UninstallDisplayName={#MyAppName}
 
 [Languages]
-Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+Name: "chinesesimp"; MessagesFile: "Languages\ChineseSimplified.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
