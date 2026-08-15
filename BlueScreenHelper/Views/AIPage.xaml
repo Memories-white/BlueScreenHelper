@@ -4,86 +4,146 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:models="using:BlueScreenHelper.Models">
 
-    <Grid Padding="24,16,24,20" RowSpacing="12">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="250" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
 
-        <Grid>
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <StackPanel>
-                <TextBlock Text="AI 诊断助手" FontSize="28" FontWeight="Bold" />
-                <TextBlock Text="接入任意 OpenAI 兼容接口（OpenAI / DeepSeek / 智谱 / 通义 / Ollama 等），用 AI 分析崩溃原因并生成解决方案。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
-            </StackPanel>
-            <ComboBox x:Name="ModelBox" Grid.Column="1" IsEditable="True" Width="220"
-                      VerticalAlignment="Center" Margin="0,0,10,0"
-                      ToolTipService.ToolTip="当前模型，可在设置中修改">
-            </ComboBox>
-            <Button Grid.Column="2" VerticalAlignment="Center" Click="Clear_Click">
-                <StackPanel Orientation="Horizontal" Spacing="6">
-                    <SymbolIcon Symbol="Delete" />
-                    <TextBlock Text="清空对话" VerticalAlignment="Center" />
-                </StackPanel>
-            </Button>
-        </Grid>
-
-        <Border Grid.Row="1" Background="{ThemeResource LayerFillColorDefaultBrush}"
-                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1"
-                CornerRadius="8" Padding="4">
-            <ListView x:Name="ChatList" SelectionMode="None"
-                      ScrollViewer.VerticalScrollBarVisibility="Auto">
-                <ListView.ItemContainerStyle>
-                    <Style TargetType="ListViewItem">
-                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                        <Setter Property="Padding" Value="10,6" />
-                    </Style>
-                </ListView.ItemContainerStyle>
-                <ListView.ItemTemplate>
-                    <DataTemplate x:DataType="models:ChatMessage">
-                        <Border Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                                CornerRadius="10" Padding="12,8" MaxWidth="820" HorizontalAlignment="Stretch">
-                            <StackPanel Spacing="4">
-                                <TextBlock FontSize="12" FontWeight="SemiBold"
-                                           Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                           Text="{x:Bind DisplayName}" />
-                                <TextBlock Text="{x:Bind Content, Mode=OneWay}" TextWrapping="Wrap" LineHeight="22" />
+        <Border Grid.Column="0" Background="{ThemeResource LayerFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,0,1,0">
+            <Grid Padding="12,16" RowSpacing="10">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="对话历史" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <Button Grid.Column="1" Click="NewSession_Click" Width="36" Height="32" Padding="4"
+                            ToolTipService.ToolTip="新建对话">
+                        <SymbolIcon Symbol="Add" />
+                    </Button>
+                </Grid>
+                <TextBlock x:Name="SessionEmpty" Grid.Row="1" Text="还没有对话，点击 + 新建一个"
+                           FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <ListView x:Name="SessionList" Grid.Row="2" SelectionMode="Single"
+                          ScrollViewer.VerticalScrollBarVisibility="Auto"
+                          SelectionChanged="SessionList_SelectionChanged">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="models:ChatSession">
+                            <StackPanel Spacing="2" Padding="4,6">
+                                <StackPanel.ContextFlyout>
+                                    <MenuFlyout>
+                                        <MenuFlyoutItem Text="删除对话" Click="DeleteSession_Click" Tag="{x:Bind Id}" />
+                                    </MenuFlyout>
+                                </StackPanel.ContextFlyout>
+                                <TextBlock Text="{x:Bind Title}" FontSize="13" FontWeight="SemiBold"
+                                           TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{x:Bind ConfigName}" FontSize="11"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           TextTrimming="CharacterEllipsis" />
                             </StackPanel>
-                        </Border>
-                    </DataTemplate>
-                </ListView.ItemTemplate>
-            </ListView>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </Grid>
         </Border>
 
-        <Grid Grid.Row="2" ColumnSpacing="10">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <TextBox x:Name="InputBox" PlaceholderText="输入问题，例如：0x000000D1 蓝屏如何解决？"
-                     AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="140"
-                     ScrollViewer.VerticalScrollBarVisibility="Auto"
-                     KeyDown="InputBox_KeyDown" />
-            <Button x:Name="SendButton" Grid.Column="1" VerticalAlignment="Bottom"
-                    Click="Send_Click" Style="{StaticResource AccentButtonStyle}">
-                <StackPanel Orientation="Horizontal" Spacing="6">
-                    <SymbolIcon Symbol="Send" />
-                    <TextBlock Text="发送" VerticalAlignment="Center" />
+        <Grid Grid.Column="1" Padding="24,16,24,20" RowSpacing="12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="AI 诊断助手" FontSize="28" FontWeight="Bold" />
+                    <TextBlock Text="使用已保存的 AI 配置分析崩溃原因并生成解决方案，对话历史自动保存。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                 </StackPanel>
-            </Button>
-            <Button x:Name="StopButton" Grid.Column="2" VerticalAlignment="Bottom"
-                    Click="Stop_Click" Visibility="Collapsed">
-                <StackPanel Orientation="Horizontal" Spacing="6">
-                    <SymbolIcon Symbol="Cancel" />
-                    <TextBlock Text="停止" VerticalAlignment="Center" />
-                </StackPanel>
-            </Button>
+                <ComboBox x:Name="AIBox" Grid.Column="1" Width="220" DisplayMemberPath="Name"
+                          VerticalAlignment="Center" Margin="0,0,10,0"
+                          ToolTipService.ToolTip="选择 AI 配置（在“设置”页保存的配置才会出现在这里）" />
+                <Button Grid.Column="2" VerticalAlignment="Center" Click="Clear_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <SymbolIcon Symbol="Delete" />
+                        <TextBlock Text="清空对话" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+            </Grid>
+
+            <InfoBar x:Name="AiBar" Grid.Row="1" IsOpen="False" Severity="Warning"
+                     Title="尚未保存任何 AI 配置"
+                     Message="请前往“设置”页面，从预设模板创建并保存一个 AI 服务配置。" />
+
+            <Border Grid.Row="2" Background="{ThemeResource LayerFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1"
+                    CornerRadius="8" Padding="4">
+                <Grid>
+                    <TextBlock x:Name="ChatEmpty" Text="输入问题开始诊断，例如：0x000000D1 蓝屏如何解决？"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <ListView x:Name="ChatList" SelectionMode="None"
+                              ScrollViewer.VerticalScrollBarVisibility="Auto">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                <Setter Property="Padding" Value="10,6" />
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="models:ChatMessage">
+                                <Border Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                        CornerRadius="10" Padding="12,8" MaxWidth="820" HorizontalAlignment="Stretch">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock FontSize="12" FontWeight="SemiBold"
+                                                   Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                                   Text="{x:Bind DisplayName}" />
+                                        <ContentControl Content="{x:Bind Rendered}" IsTabStop="False" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="3" ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="InputBox" PlaceholderText="输入问题，例如：0x000000D1 蓝屏如何解决？"
+                         AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="140"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto"
+                         KeyDown="InputBox_KeyDown" />
+                <Button x:Name="SendButton" Grid.Column="1" VerticalAlignment="Bottom"
+                        Click="Send_Click" Style="{StaticResource AccentButtonStyle}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <SymbolIcon Symbol="Send" />
+                        <TextBlock Text="发送" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+                <Button x:Name="StopButton" Grid.Column="2" VerticalAlignment="Bottom"
+                        Click="Stop_Click" Visibility="Collapsed">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <SymbolIcon Symbol="Cancel" />
+                        <TextBlock Text="停止" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+            </Grid>
         </Grid>
     </Grid>
 </Page>

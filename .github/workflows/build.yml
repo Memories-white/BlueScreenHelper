@@ -55,9 +55,23 @@ jobs:
         shell: pwsh
         run: |
           $ver = $env:GITHUB_REF -replace 'refs/tags/v', ''
+          $verNoDash = ($ver -split '-')[0]
+
           $iss = Get-Content installer/installer.iss -Raw
           $iss = $iss -replace '#define MyAppVersion "[^"]*"', "#define MyAppVersion `"$ver`""
           [System.IO.File]::WriteAllText("installer/installer.iss", $iss, (New-Object System.Text.UTF8Encoding($true)))
+
+          $csproj = Get-Content BlueScreenHelper/BlueScreenHelper.csproj -Raw
+          if ($csproj -match '<Version>[\s\S]*?</Version>') {
+            $csproj = $csproj -replace '<Version>[\s\S]*?</Version>', "<Version>$verNoDash</Version>"
+          } else {
+            $csproj = $csproj -replace '<TargetFramework>[^<]*</TargetFramework>', "`$0`n    <Version>$verNoDash</Version>"
+          }
+          [System.IO.File]::WriteAllText("BlueScreenHelper/BlueScreenHelper.csproj", $csproj)
+
+          $manifest = Get-Content BlueScreenHelper/app.manifest -Raw
+          $manifest = $manifest -replace 'version="\d+\.\d+\.\d+(\.\d+)?"', "version=`"$verNoDash.0`""
+          [System.IO.File]::WriteAllText("BlueScreenHelper/app.manifest", $manifest)
 
       - name: Compile installer with ISCC
         shell: pwsh

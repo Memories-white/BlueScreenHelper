@@ -15,6 +15,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
+    <Version>1.0.4</Version>
     <PublishProfile>Default</PublishProfile>
     <EnableMsixTooling>true</EnableMsixTooling>
   </PropertyGroup>
