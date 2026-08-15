@@ -19,6 +19,10 @@ BundleArtifacts/
 TestResults/
 *.trx
 
+## Publish / install packages
+publish/
+dist/
+
 ## IDE
 .idea/
 *.swp
