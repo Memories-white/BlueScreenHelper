@@ -22,6 +22,17 @@ public sealed partial class AIPage : Page
         InitializeComponent();
         ChatList.ItemsSource = _messages;
         SessionList.ItemsSource = _sessions;
+        ToolLogList.ItemsSource = AiToolLog.Entries;
+        AiToolLog.Entries.CollectionChanged += (_, _) =>
+        {
+            ToolLogList.Visibility = Visibility.Visible;
+            ToolLogEmpty.Visibility = Visibility.Collapsed;
+            ToolLogExpander.IsExpanded = true;
+            if (AiToolLog.Entries.Count > 0)
+            {
+                ToolLogList.ScrollIntoView(AiToolLog.Entries[0]);
+            }
+        };
     }
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
@@ -157,7 +168,7 @@ public sealed partial class AIPage : Page
         {
             var ctrl = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control)
                 .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
-            if (ctrl)
+            if (!ctrl)
             {
                 e.Handled = true;
                 _ = SendAsync();
@@ -167,6 +178,11 @@ public sealed partial class AIPage : Page
 
     private async void Send_Click(object sender, RoutedEventArgs e)
     {
+        if (_sending)
+        {
+            _cts?.Cancel();
+            return;
+        }
         await SendAsync();
     }
 
@@ -200,8 +216,9 @@ public sealed partial class AIPage : Page
         }
         _sending = true;
         _cts = new CancellationTokenSource();
-        SendButton.IsEnabled = false;
-        StopButton.Visibility = Visibility.Visible;
+        SendButton.IsEnabled = true;
+        SendButtonText.Text = "中止";
+        SendIcon.Symbol = Symbol.Cancel;
 
         var snapshot = _current!.Messages.TakeLast(40).ToList();
         var assistant = new ChatMessage { Role = "assistant", Content = "正在思考..." };
@@ -211,11 +228,21 @@ public sealed partial class AIPage : Page
 
         try
         {
-            await _ai.ChatAsync(config, snapshot, systemPromptOverride, delta =>
+            await _ai.ChatWithToolsAsync(config, snapshot, systemPromptOverride, delta =>
             {
                 DispatcherQueue.TryEnqueue(() =>
                 {
                     assistant.AppendContent(delta);
+                    ScrollToBottom();
+                });
+            }, tool =>
+            {
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    assistant.Content = $"正在自动采集系统信息：{tool.Name} ...";
+                    var sysMsg = new ChatMessage { Role = "system", Content = $"已自动采集：{tool.Name}（{tool.Action}）" };
+                    _messages.Add(sysMsg);
+                    _current!.Messages.Add(sysMsg);
                     ScrollToBottom();
                 });
             }, _cts.Token);
@@ -252,16 +279,12 @@ public sealed partial class AIPage : Page
         finally
         {
             _sending = false;
+            SendButtonText.Text = "发送";
+            SendIcon.Symbol = Symbol.Send;
             SendButton.IsEnabled = AppState.Settings.AIConfigs.Count > 0;
-            StopButton.Visibility = Visibility.Collapsed;
             _cts?.Dispose();
             _cts = null;
         }
-    }
-
-    private void Stop_Click(object sender, RoutedEventArgs e)
-    {
-        _cts?.Cancel();
     }
 
     private void Clear_Click(object sender, RoutedEventArgs e)

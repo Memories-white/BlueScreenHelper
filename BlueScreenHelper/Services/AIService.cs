@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using BlueScreenHelper.Models;
 
 namespace BlueScreenHelper.Services;
@@ -8,6 +9,8 @@ namespace BlueScreenHelper.Services;
 public sealed class AIService
 {
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(120) };
+
+    private static readonly Regex ToolCallRegex = new(@"\[\[TOOL:([A-Za-z0-9_]+)\]\]", RegexOptions.Compiled);
 
     public async Task<string> ChatAsync(AIConfigItem config, IReadOnlyList<ChatMessage> history,
         string? systemPromptOverride, Action<string>? onDelta, CancellationToken ct)
@@ -27,6 +30,81 @@ public sealed class AIService
             AIProvider.Gemini => await ChatGeminiAsync(config, history, systemPromptOverride, onDelta, ct),
             _ => await ChatOpenAIAsync(config, history, systemPromptOverride, onDelta, ct)
         };
+    }
+
+    /// <summary>
+    /// 带系统工具调用能力的对话：模型通过 [[TOOL:key]] 请求采集本机系统数据，自动执行并把结果回传给模型继续分析。
+    /// </summary>
+    public async Task<string> ChatWithToolsAsync(AIConfigItem config, IReadOnlyList<ChatMessage> history,
+        string? systemPromptOverride, Action<string>? onDelta, Action<AiToolDef>? onToolStart, CancellationToken ct)
+    {
+        var work = history
+            .Select(h => new ChatMessage { Role = h.Role, Content = h.Content })
+            .Where(h => !string.IsNullOrWhiteSpace(h.Content))
+            .ToList();
+
+        for (var round = 0; round < 5; round++)
+        {
+            var mergedSystem = (string.IsNullOrWhiteSpace(systemPromptOverride) ? config.SystemPrompt : systemPromptOverride)
+                               + AiSystemTools.Instructions;
+
+            var reply = await ChatAsync(config, work, mergedSystem, onDelta, ct);
+
+            var m = ToolCallRegex.Match(reply);
+            if (!m.Success)
+            {
+                return reply;
+            }
+
+            var tool = AiSystemTools.Find(m.Groups[1].Value);
+            work.Add(new ChatMessage { Role = "assistant", Content = reply });
+
+            if (tool == null)
+            {
+                work.Add(new ChatMessage
+                {
+                    Role = "user",
+                    Content = "【系统采集结果】请求了未知工具，请忽略该请求，基于已有信息继续分析，不要再次请求工具。"
+                });
+                continue;
+            }
+
+            onToolStart?.Invoke(tool);
+
+            string result;
+            var success = true;
+            try
+            {
+                result = await Task.Run(tool.Execute, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                success = false;
+                result = $"采集失败：{ex.Message}";
+            }
+
+            AiToolLog.Add(tool.Name, tool.Action, success,
+                success ? FirstLine(result) : result);
+
+            work.Add(new ChatMessage
+            {
+                Role = "user",
+                Content = $"【系统采集结果 · {tool.Name}】\n{Truncate(result, 6000)}"
+            });
+        }
+
+        throw new InvalidOperationException("工具调用轮次过多，已自动停止。请重试。");
+    }
+
+    private static string FirstLine(string text)
+    {
+        var t = text.Trim();
+        var idx = t.IndexOf('\n');
+        return idx > 0 ? t[..idx] : t;
     }
 
     public async Task<string> TestConnectionAsync(AIConfigItem config)
@@ -53,7 +131,7 @@ public sealed class AIService
         {
             if (!string.IsNullOrWhiteSpace(m.Content))
             {
-                messages.Add(new { role = m.Role, content = m.Content });
+                messages.Add(new { role = m.Role == "assistant" ? "assistant" : "user", content = m.Content });
             }
         }
 
