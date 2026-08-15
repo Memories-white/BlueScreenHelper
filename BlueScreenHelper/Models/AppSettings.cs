@@ -98,6 +98,7 @@ public static class AIPresets
 
 public sealed class AppSettings
 {
+    public bool WelcomeDismissed { get; set; }
     public List<AIConfigItem> AIConfigs { get; set; } = new();
     public string ActiveConfigName { get; set; } = "";
 
@@ -225,7 +226,12 @@ public sealed class ChatMessage : INotifyPropertyChanged
     [JsonIgnore]
     public UIElement? Rendered => _rendered;
 
-    public string DisplayName => Role == "user" ? "你" : "AI 助手";
+    public string DisplayName => Role switch
+    {
+        "user" => "你",
+        "system" => "系统",
+        _ => "AI 助手"
+    };
 
     public void AppendContent(string delta)
     {

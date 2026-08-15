@@ -42,6 +42,7 @@
             </Grid>
 
             <InfoBar x:Name="WelcomeBar" IsOpen="True" Severity="Informational"
+                     CloseButtonClick="WelcomeBar_CloseButtonClick"
                      Title="欢迎使用"
                      Message="选择左侧“转储分析”可解析 .dmp 崩溃文件；点击“系统扫描”可自动检查事件日志、驱动、磁盘与内存健康，并使用 AI 获取解决方案。" />
 

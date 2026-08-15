@@ -14,7 +14,9 @@ public static partial class MarkdownRenderer
 {
     private const string InlineTokenPattern = @"(\*\*.*?\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\))";
     private static readonly Regex InlineTokenRegex = new(InlineTokenPattern, RegexOptions.Compiled);
-    private static readonly Regex OrderedListRegex = new(@"^\d+[.、]\s+(.*)$", RegexOptions.Compiled);
+    private static readonly Regex HeadingRegex = new(@"^(#{1,6})\s*[#*\s]*(.+)$", RegexOptions.Compiled);
+    private static readonly Regex UnorderedRegex = new(@"^(?:[-*]\s+|[•·]\s*)(.+)$", RegexOptions.Compiled);
+    private static readonly Regex OrderedRegex = new(@"^(\d+)[.、)）]?\s*(.+)$", RegexOptions.Compiled);
 
     public static UIElement Render(string? markdown)
     {
@@ -27,6 +29,7 @@ public static partial class MarkdownRenderer
         var lines = markdown.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
         var inCodeBlock = false;
         var codeBuf = new StringBuilder();
+        TextBlock? lastListText = null;
 
         foreach (var raw in lines)
         {
@@ -58,19 +61,11 @@ public static partial class MarkdownRenderer
                 continue;
             }
 
-            if (line.StartsWith("### "))
+            var heading = HeadingRegex.Match(line);
+            if (heading.Success)
             {
-                AddHeading(root, line[4..], 18);
-                continue;
-            }
-            if (line.StartsWith("## "))
-            {
-                AddHeading(root, line[3..], 20);
-                continue;
-            }
-            if (line.StartsWith("# "))
-            {
-                AddHeading(root, line[2..], 22);
+                var level = heading.Groups[1].Value.Length;
+                AddHeading(root, heading.Groups[2].Value, level);
                 continue;
             }
 
@@ -91,17 +86,24 @@ public static partial class MarkdownRenderer
                 continue;
             }
 
-            if (line.StartsWith("- ") || line.StartsWith("* ") || line.StartsWith("• "))
+            var bullet = UnorderedRegex.Match(line);
+            if (bullet.Success)
             {
-                AddListItem(root, "•", line[2..].TrimStart());
+                AddListItem(root, "•", bullet.Groups[1].Value.Trim(), out _, out lastListText);
                 continue;
             }
 
-            var ordered = OrderedListRegex.Match(line);
+            var ordered = OrderedRegex.Match(line);
             if (ordered.Success)
             {
-                var num = line[..line.IndexOf('.')];
-                AddListItem(root, num, ordered.Groups[1].Value);
+                AddListItem(root, ordered.Groups[1].Value, ordered.Groups[2].Value.Trim(), out _, out lastListText);
+                continue;
+            }
+
+            if (char.IsWhiteSpace(line[0]) && lastListText != null)
+            {
+                lastListText.Inlines.Add(new Run { Text = "\n" });
+                AddInlines(lastListText, line.Trim());
                 continue;
             }
 
@@ -116,8 +118,17 @@ public static partial class MarkdownRenderer
         return root;
     }
 
-    private static void AddHeading(StackPanel root, string text, double fontSize)
+    private static void AddHeading(StackPanel root, string text, int level)
     {
+        var fontSize = level switch
+        {
+            1 => 22.0,
+            2 => 20.0,
+            3 => 18.0,
+            4 => 16.0,
+            5 => 15.0,
+            _ => 14.0
+        };
         var tb = new TextBlock
         {
             TextWrapping = TextWrapping.Wrap,
@@ -136,15 +147,15 @@ public static partial class MarkdownRenderer
         root.Children.Add(tb);
     }
 
-    private static void AddListItem(StackPanel root, string marker, string text)
+    private static void AddListItem(StackPanel root, string marker, string text, out Grid panel, out TextBlock tb)
     {
-        var panel = new Grid { ColumnSpacing = 8 };
+        panel = new Grid { ColumnSpacing = 8 };
         panel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         var mark = new TextBlock { Text = marker, FontWeight = FontWeights.SemiBold, Foreground = GetAccentBrush() };
         Grid.SetColumn(mark, 0);
         panel.Children.Add(mark);
-        var tb = new TextBlock { TextWrapping = TextWrapping.Wrap, LineHeight = 22 };
+        tb = new TextBlock { TextWrapping = TextWrapping.Wrap, LineHeight = 22 };
         AddInlines(tb, text);
         Grid.SetColumn(tb, 1);
         panel.Children.Add(tb);

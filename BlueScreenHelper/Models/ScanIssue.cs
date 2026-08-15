@@ -26,7 +26,11 @@ public sealed class ScanIssue
     public string Title { get; set; } = "";
     public IssueSeverity Severity { get; set; } = IssueSeverity.Info;
     public string Description { get; set; } = "";
+    public string Detail { get; set; } = "";
     public string Recommendation { get; set; } = "";
+    public DateTime? DetectedAt { get; set; }
+
+    public string TimeText => DetectedAt?.ToString("MM-dd HH:mm") ?? "";
 
     public string SeverityText => Severity switch
     {

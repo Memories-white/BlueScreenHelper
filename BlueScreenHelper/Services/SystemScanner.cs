@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Diagnostics.Eventing.Reader;
 using System.Management;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.RegularExpressions;
 using BlueScreenHelper.Models;
 using Microsoft.Win32;
@@ -150,7 +151,9 @@ public static class SystemScanner
                 Category = "崩溃记录",
                 Title = $"检测到蓝屏：{code} {name}",
                 Severity = IssueSeverity.Critical,
+                DetectedAt = time,
                 Description = $"崩溃时间：{time:yyyy-MM-dd HH:mm:ss}{(driver != null ? $"\n转储报告中涉及的驱动：{driver}" : "")}\n{entry?.Description ?? "知识库未收录该错误代码。"}",
+                Detail = BuildBugCheckDetail(bugChecks),
                 Recommendation = string.Join("\n", entry?.Solutions ?? new[] { "使用转储分析功能解析 .dmp 文件，或使用 AI 诊断获取详细方案。" })
             });
         }
@@ -161,9 +164,30 @@ public static class SystemScanner
             Category = "崩溃记录",
             Title = $"近 30 天共发生 {bugChecks.Count} 次蓝屏（{distinct} 种错误代码）",
             Severity = bugChecks.Count >= 3 ? IssueSeverity.Warning : IssueSeverity.Info,
+            DetectedAt = bugChecks.Count > 0 ? bugChecks.Max(b => b.Time) : null,
             Description = "频繁蓝屏通常指向驱动、内存或硬件问题。",
+            Detail = BuildBugCheckDetail(bugChecks),
             Recommendation = "建议逐个分析 Minidump 目录中的转储文件，找出共性驱动；同时运行内存诊断。"
         });
+    }
+
+    private static string BuildBugCheckDetail(List<(string Code, string Name, DateTime? Time, string? Driver)> bugChecks)
+    {
+        if (bugChecks.Count == 0)
+        {
+            return "";
+        }
+        var sb = new StringBuilder();
+        sb.AppendLine($"共记录 {bugChecks.Count} 次 BugCheck，按时间倒序：");
+        foreach (var (code, name, time, driver) in bugChecks)
+        {
+            sb.AppendLine($"  {time:yyyy-MM-dd HH:mm}  {code} {name}{(driver != null ? $"（涉及驱动 {driver}）" : "")}");
+        }
+        var freq = bugChecks.GroupBy(b => b.Code).OrderByDescending(g => g.Count()).First();
+        sb.AppendLine();
+        sb.AppendLine($"最常见错误：{freq.Key} {freq.First().Name}，共 {freq.Count()} 次。");
+        sb.AppendLine($"统计范围：近 30 天系统日志（Event ID 1001，来源 BugCheck）。");
+        return sb.ToString();
     }
 
     private static void ScanUnexpectedShutdowns(List<ScanIssue> issues)
@@ -180,7 +204,10 @@ public static class SystemScanner
             Category = "崩溃记录",
             Title = $"检测到 {events.Count} 次异常关机",
             Severity = IssueSeverity.Warning,
+            DetectedAt = latest.Time,
             Description = $"最近一次异常关机发生在 {latest.Time:yyyy-MM-dd HH:mm:ss}，可能由断电、硬件故障或系统崩溃引起。",
+            Detail = BuildEventDetail(events, "异常关机记录（Event ID 6008）",
+                "异常关机常由供电中断、过热强制断电或系统崩溃引起，可与 BugCheck 记录结合判断。"),
             Recommendation = "检查电源连接与供电稳定性；异常关机常与蓝屏（Kernel-Power 41）同时出现，可结合转储分析定位。"
         });
     }
@@ -199,8 +226,11 @@ public static class SystemScanner
             Category = "硬件",
             Title = $"检测到 {events.Count} 条 WHEA 硬件错误 (Event ID {idText})",
             Severity = IssueSeverity.Critical,
+            DetectedAt = events[0].Time,
             Description = "Windows 硬件错误架构记录了无法纠正的硬件错误，通常与 CPU、内存、主板或电源相关。\n" +
                           $"最近一次：{events[0].Time:yyyy-MM-dd HH:mm:ss}",
+            Detail = BuildEventDetail(events, "WHEA 硬件错误记录",
+                "WHEA-Logger 事件代表硬件层报告的不可纠正错误。常见事件 ID：17/18（纠正的机器检查）、19（不可纠正）、46（硬件状态）、47（缓存层级）。此类错误优先排查内存超频（XMP/EXPO）与供电。"),
             Recommendation = "1) 恢复 BIOS 默认设置（尤其关闭内存 XMP/EXPO 超频）\n2) 运行内存诊断 mdsched.exe\n3) 检查散热与供电\n4) 更新 BIOS"
         });
     }
@@ -219,7 +249,10 @@ public static class SystemScanner
             Category = "存储",
             Title = $"检测到 {events.Count} 条磁盘/文件系统错误 (Event ID {idText})",
             Severity = IssueSeverity.Critical,
+            DetectedAt = events[0].Time,
             Description = $"最近一次磁盘错误：{events[0].Time:yyyy-MM-dd HH:mm:ss}\n磁盘错误可导致蓝屏、文件损坏与数据丢失。",
+            Detail = BuildEventDetail(events, "磁盘/文件系统错误记录",
+                "常见事件 ID：7（坏扇区）、11（驱动 I/O 错误）、51（分页操作失败）、153（磁盘 IO 超时）、55（文件系统损坏）。持续出现建议尽快备份并检测磁盘健康。"),
             Recommendation = "1) 立即备份重要数据\n2) 运行 chkdsk C: /f /r 检查系统盘\n3) 使用 CrystalDiskInfo 检查 SMART 状态\n4) 更换 SATA/电源线，必要时更换磁盘"
         });
     }
@@ -246,7 +279,10 @@ public static class SystemScanner
             Category = "内存",
             Title = hasError ? "内存诊断发现硬件错误" : "内存诊断通过",
             Severity = hasError ? IssueSeverity.Critical : IssueSeverity.Info,
+            DetectedAt = events[0].Time,
             Description = $"最近一次诊断时间：{events[0].Time:yyyy-MM-dd HH:mm:ss}",
+            Detail = BuildEventDetail(events, "内存诊断结果（MemoryDiagnostics-Results）",
+                "事件 1101/1102 表示诊断完成且通过，1201/1202 表示发现内存硬件故障。若发现故障，通常无法修复，需要更换内存条。"),
             Recommendation = hasError
                 ? "1) 逐条测试内存，找出故障条\n2) 清洁内存金手指与插槽\n3) 必要时更换内存"
                 : "内存健康，无需处理。"
@@ -297,8 +333,11 @@ public static class SystemScanner
             Category = "转储文件",
             Title = $"找到 {files.Count} 个崩溃转储文件",
             Severity = files.Count >= 3 ? IssueSeverity.Warning : IssueSeverity.Info,
+            DetectedAt = files.Count > 0 ? files[0].Time : null,
             Description = string.Join("\n", files.Take(5).Select(f =>
                 $"{(Path.GetFileName(f.Path) == "MEMORY.DMP" ? "完整转储" : "小转储")} {Path.GetFileName(f.Path)}：{f.Time:yyyy-MM-dd HH:mm}（{DumpParser.FormatSize(f.Size)}）")),
+            Detail = string.Join("\n", files.Select(f =>
+                $"{(Path.GetFileName(f.Path) == "MEMORY.DMP" ? "完整转储" : "小转储")} {Path.GetFileName(f.Path)}\n  路径：{f.Path}\n  时间：{f.Time:yyyy-MM-dd HH:mm:ss}\n  大小：{DumpParser.FormatSize(f.Size)}")),
             Recommendation = "使用本软件的“转储分析”功能逐个解析小转储文件，可快速定位故障驱动。"
         });
     }
@@ -318,7 +357,10 @@ public static class SystemScanner
             Category = "驱动程序",
             Title = $"检测到 {events.Count} 次驱动程序加载失败 (Event ID 219)",
             Severity = IssueSeverity.Warning,
+            DetectedAt = events[0].Time,
             Description = $"最近一次：{events[0].Time:yyyy-MM-dd HH:mm:ss}\n{desc}",
+            Detail = BuildEventDetail(events, "驱动加载失败记录（Kernel-PnP 219）",
+                "Kernel-PnP 219/410 表示设备驱动在启动时未能成功加载。常见原因：驱动版本不兼容、驱动文件损坏、设备冲突。"),
             Recommendation = "在设备管理器中查找带黄色感叹号的设备，更新或重装其驱动；若为旧设备，可卸载后重新扫描硬件。"
         });
     }
@@ -347,6 +389,7 @@ public static class SystemScanner
                     Title = "SMART 预测磁盘即将发生故障",
                     Severity = IssueSeverity.Critical,
                     Description = "以下磁盘的 SMART 自检已标记预测性故障：\n" + string.Join("\n", failed),
+                    Detail = string.Join("\n", failed.Select(f => $"磁盘：{f}")),
                     Recommendation = "立即备份该磁盘数据，并使用官方工具（如 CrystalDiskInfo、厂商诊断工具）确认，及时更换磁盘。"
                 });
             }
@@ -369,6 +412,7 @@ public static class SystemScanner
         try
         {
             using var searcher = new ManagementObjectSearcher("SELECT * FROM Win32_LogicalDisk WHERE DriveType=3");
+            var diskInfo = new StringBuilder();
             foreach (var o in searcher.Get())
             {
                 using var mo = (ManagementObject)o;
@@ -380,6 +424,7 @@ public static class SystemScanner
                     continue;
                 }
                 var usedPercent = (double)(total - free) / total * 100.0;
+                diskInfo.AppendLine($"  {id}：已用 {usedPercent:F1}%（剩余 {free / 1073741824.0:F1} GB / 共 {total / 1073741824.0:F1} GB）");
                 if (usedPercent >= 90)
                 {
                     issues.Add(new ScanIssue
@@ -388,6 +433,7 @@ public static class SystemScanner
                         Title = $"磁盘 {id} 空间不足",
                         Severity = IssueSeverity.Warning,
                         Description = $"已用空间 {usedPercent:F1}%（剩余 {free / 1073741824.0:F1} GB / 共 {total / 1073741824.0:F1} GB）。",
+                        Detail = "分区使用情况：\n" + diskInfo,
                         Recommendation = "清理临时文件与大型文件；空间不足会影响系统稳定性与页面文件。"
                     });
                 }
@@ -427,7 +473,9 @@ public static class SystemScanner
             Category = "应用程序",
             Title = $"近 7 天有 {groups.Sum(g => g.Count)} 次应用程序崩溃",
             Severity = IssueSeverity.Info,
+            DetectedAt = groups.Max(g => g.Latest),
             Description = "以下程序出现崩溃：\n" + summary,
+            Detail = string.Join("\n", groups.Select(g => $"  {g.App}：{g.Count} 次，最近 {g.Latest:yyyy-MM-dd HH:mm}")),
             Recommendation = "更新对应软件至最新版本；崩溃频繁的程序可尝试重装。应用程序崩溃一般不会导致蓝屏，但可能是内存/驱动异常的信号。"
         });
     }
@@ -465,7 +513,25 @@ public static class SystemScanner
         return m.Success ? m.Groups[1].Value : "";
     }
 
-    private static List<EventInfo> QueryEvents(string logName, string xpath, int max)
+    internal static string BuildEventDetail(List<EventInfo> events, string title, string note)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"{title}（共 {events.Count} 条，按时间倒序）：");
+        foreach (var e in events)
+        {
+            var desc = e.Description ?? "";
+            if (desc.Length > 200)
+            {
+                desc = desc[..200] + "……";
+            }
+            sb.AppendLine($"  {e.Time:yyyy-MM-dd HH:mm}  Event ID {e.Id}：{desc.Replace("\n", " ")}");
+        }
+        sb.AppendLine();
+        sb.AppendLine(note);
+        return sb.ToString();
+    }
+
+    internal static List<EventInfo> QueryEvents(string logName, string xpath, int max)
     {
         var result = new List<EventInfo>();
         try
@@ -520,7 +586,7 @@ public static class SystemScanner
         };
     }
 
-    private sealed class EventInfo
+    internal sealed class EventInfo
     {
         public int Id { get; set; }
         public DateTime? Time { get; set; }

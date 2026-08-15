@@ -76,13 +76,19 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
-            <ComboBox x:Name="FilterBox" Width="220" HorizontalAlignment="Left"
-                      SelectionChanged="FilterBox_SelectionChanged">
-                <ComboBoxItem Content="全部问题" Tag="all" IsSelected="True" />
-                <ComboBoxItem Content="仅严重问题" Tag="critical" />
-                <ComboBoxItem Content="严重 + 警告" Tag="warning" />
-                <ComboBoxItem Content="仅提示" Tag="info" />
-            </ComboBox>
+            <StackPanel Orientation="Horizontal" Spacing="12">
+                <ComboBox x:Name="FilterBox" Width="220"
+                          SelectionChanged="FilterBox_SelectionChanged">
+                    <ComboBoxItem Content="全部问题" Tag="all" IsSelected="True" />
+                    <ComboBoxItem Content="仅严重问题" Tag="critical" />
+                    <ComboBoxItem Content="严重 + 警告" Tag="warning" />
+                    <ComboBoxItem Content="仅提示" Tag="info" />
+                </ComboBox>
+                <TextBlock Text="排序：" VerticalAlignment="Center"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <RadioButton x:Name="SortSeverity" Content="按严重程度" IsChecked="True" Checked="Sort_Changed" />
+                <RadioButton x:Name="SortTime" Content="按时间" Checked="Sort_Changed" />
+            </StackPanel>
             <ListView x:Name="IssueList" Grid.Row="1" SelectionMode="None"
                       ScrollViewer.VerticalScrollBarVisibility="Auto">
                 <ListView.ItemTemplate>
@@ -90,22 +96,37 @@
                         <Border Background="{ThemeResource LayerFillColorDefaultBrush}"
                                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                                 BorderThickness="1" CornerRadius="8" Padding="14,10" Margin="0,4">
-                            <StackPanel Spacing="6">
-                                <StackPanel Orientation="Horizontal" Spacing="10">
-                                    <Border Width="10" Height="10" CornerRadius="5" VerticalAlignment="Center"
-                                            Background="{x:Bind SeverityBrush}" />
-                                    <TextBlock FontWeight="SemiBold" Text="{x:Bind Title}" TextWrapping="Wrap" />
-                                    <Border Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                                            CornerRadius="10" Padding="8,2" VerticalAlignment="Center">
-                                        <TextBlock FontSize="11" Text="{x:Bind SeverityText}" />
-                                    </Border>
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Spacing="6">
+                                    <StackPanel Orientation="Horizontal" Spacing="10">
+                                        <Border Width="10" Height="10" CornerRadius="5" VerticalAlignment="Center"
+                                                Background="{x:Bind SeverityBrush}" />
+                                        <TextBlock FontWeight="SemiBold" Text="{x:Bind Title}" TextWrapping="Wrap" />
+                                        <Border Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                                CornerRadius="10" Padding="8,2" VerticalAlignment="Center">
+                                            <TextBlock FontSize="11" Text="{x:Bind SeverityText}" />
+                                        </Border>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="{x:Bind Category}" FontSize="11"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Text="{x:Bind TimeText}" FontSize="11"
+                                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                                    </StackPanel>
+                                    <TextBlock Text="{x:Bind Description}" TextWrapping="Wrap"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 </StackPanel>
-                                <TextBlock Text="{x:Bind Category}" FontSize="11"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                <TextBlock Text="{x:Bind Description}" TextWrapping="Wrap"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                <TextBlock Text="{x:Bind Recommendation}" TextWrapping="Wrap" />
-                            </StackPanel>
+                                <StackPanel Grid.Column="1" Spacing="6" VerticalAlignment="Center">
+                                    <Button Content="查看详情" FontSize="12" Padding="10,4"
+                                            Click="IssueDetail_Click" />
+                                    <Button Content="AI 分析" FontSize="12" Padding="10,4"
+                                            Click="IssueAi_Click" />
+                                </StackPanel>
+                            </Grid>
                         </Border>
                     </DataTemplate>
                 </ListView.ItemTemplate>

@@ -20,6 +20,14 @@ public sealed partial class DashboardPage : Page
     {
         InitializeComponent();
         CrashList.ItemsSource = _crashes;
+        WelcomeBar.IsOpen = !AppState.Settings.WelcomeDismissed;
+    }
+
+    private void WelcomeBar_CloseButtonClick(InfoBar sender, object args)
+    {
+        AppState.Settings.WelcomeDismissed = true;
+        AppState.Settings.Save();
+        WelcomeBar.IsOpen = false;
     }
 
     private async void Page_Loaded(object sender, RoutedEventArgs e)
@@ -29,6 +37,10 @@ public sealed partial class DashboardPage : Page
 
     public void ShowWelcomeBar()
     {
+        if (AppState.Settings.WelcomeDismissed)
+        {
+            return;
+        }
         WelcomeBar.IsOpen = true;
     }
 
