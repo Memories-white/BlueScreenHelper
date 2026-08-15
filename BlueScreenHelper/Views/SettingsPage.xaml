@@ -27,35 +27,11 @@
                 <StackPanel>
                     <TextBlock Text="AI 服务配置" FontSize="18" FontWeight="SemiBold" />
 
-                    <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,12,0,0">
-                        <ComboBox x:Name="ConfigBox" Width="260" VerticalAlignment="Center"
-                                  DisplayMemberPath="Name"
-                                  SelectionChanged="ConfigBox_SelectionChanged" />
-                        <Button x:Name="NewButton">
-                            <Button.Flyout>
-                                <MenuFlyout x:Name="PresetMenu" Placement="BottomEdgeAlignedLeft">
-                                    <MenuFlyoutItem Text="OpenAI（gpt-4o-mini）" Click="PresetItem_Click" Tag="OpenAI" />
-                                    <MenuFlyoutItem Text="Anthropic Claude（claude-sonnet-4-5）" Click="PresetItem_Click" Tag="Anthropic" />
-                                    <MenuFlyoutItem Text="Google Gemini（gemini-2.0-flash）" Click="PresetItem_Click" Tag="Gemini" />
-                                    <MenuFlyoutItem Text="自定义（本地 Ollama 等，OpenAI 兼容）" Click="PresetItem_Click" Tag="Custom" />
-                                </MenuFlyout>
-                            </Button.Flyout>
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <SymbolIcon Symbol="Add" />
-                                <TextBlock Text="新建配置" VerticalAlignment="Center" />
-                            </StackPanel>
-                        </Button>
-                        <Button x:Name="DeleteButton" Click="Delete_Click" VerticalAlignment="Center">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <SymbolIcon Symbol="Delete" />
-                                <TextBlock Text="删除配置" VerticalAlignment="Center" />
-                            </StackPanel>
-                        </Button>
+                    <TextBlock Style="{StaticResource FieldLabel}" Text="选择 AI" />
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <ComboBox x:Name="PresetBox" Width="300" HorizontalAlignment="Left" PlaceholderText="选择 AI 服务…"
+                                  DisplayMemberPath="Name" SelectionChanged="PresetBox_SelectionChanged" />
                     </StackPanel>
-                    <TextBlock x:Name="ProviderText" Style="{StaticResource FieldLabel}" Margin="0,4,0,0" />
-
-                    <TextBlock Style="{StaticResource FieldLabel}" Text="配置名称" />
-                    <TextBox x:Name="NameBox" Width="300" HorizontalAlignment="Left" PlaceholderText="例如：我的 OpenAI" />
 
                     <TextBlock Style="{StaticResource FieldLabel}" Text="接口地址 (Base URL)" />
                     <TextBox x:Name="BaseUrlBox" PlaceholderText="https://api.openai.com/v1" />
@@ -63,8 +39,20 @@
                     <TextBlock Style="{StaticResource FieldLabel}" Text="API Key（本地服务如 Ollama 可留空）" />
                     <PasswordBox x:Name="ApiKeyBox" PlaceholderText="sk-..." />
 
-                    <TextBlock Style="{StaticResource FieldLabel}" Text="模型名称" />
-                    <ComboBox x:Name="ModelBox" IsEditable="True" Width="300" HorizontalAlignment="Left" />
+                    <TextBlock Style="{StaticResource FieldLabel}" Text="模型名称（可手动输入，或点击“查询模型”自动获取该地址可用的模型后选择）" />
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <ComboBox x:Name="ModelBox" IsEditable="True" Width="300" HorizontalAlignment="Left" />
+                        <Button x:Name="FetchModelsButton" Click="FetchModels_Click" VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <SymbolIcon Symbol="Refresh" />
+                                <TextBlock Text="查询模型" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <TextBlock x:Name="FetchModelsTipText" Visibility="Collapsed" VerticalAlignment="Center" FontSize="12"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   Text="Anthropic 协议无模型列表接口，请手动输入模型名称" />
+                        <ProgressRing x:Name="ModelFetchRing" IsActive="False" Width="22" Height="22" VerticalAlignment="Center" />
+                    </StackPanel>
 
                     <TextBlock Style="{StaticResource FieldLabel}" Text="发散度（0-1，值越低回答越严谨收敛，值越高越自由发散）" />
                     <Slider x:Name="TempSlider" Minimum="0" Maximum="1" StepFrequency="0.05" Width="300" HorizontalAlignment="Left" />

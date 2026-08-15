@@ -18,54 +18,59 @@ public sealed partial class SettingsPage : Page
     };
 
     private AIConfigItem? _current;
+    private bool _syncingPreset;
 
     public SettingsPage()
     {
         InitializeComponent();
+        PresetBox.ItemsSource = AIPresets.Templates;
         ModelBox.ItemsSource = ModelPresets;
         TempSlider.ValueChanged += (_, _) => TempValueText.Text = DescribeTemperature(TempSlider.Value);
     }
 
-    private void Page_Loaded(object sender, RoutedEventArgs e)
+    private async void Page_Loaded(object sender, RoutedEventArgs e)
     {
         VersionText.Text = $"蓝屏诊断助手 v{UpdaterService.CurrentVersion} — WinUI 3";
         TempValueText.Text = DescribeTemperature(TempSlider.Value);
-        RefreshConfigs(selectActive: true);
+        RefreshConfigs();
+        if (AppState.Settings.AIConfigs.Count == 0)
+        {
+            PresetBox.SelectedIndex = 0;
+        }
+        await SyncVersionWithGitHubAsync();
     }
 
-    private void RefreshConfigs(bool selectActive)
+    private async Task SyncVersionWithGitHubAsync()
     {
-        ConfigBox.ItemsSource = null;
-        ConfigBox.ItemsSource = AppState.Settings.AIConfigs;
+        try
+        {
+            var info = await UpdaterService.CheckAsync();
+            if (info != null)
+            {
+                VersionText.Text = $"蓝屏诊断助手 v{UpdaterService.CurrentVersion} — WinUI 3（GitHub 最新：v{info.LatestVersion}）";
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private void RefreshConfigs()
+    {
         if (AppState.Settings.AIConfigs.Count == 0)
         {
             LoadConfigToFields(null);
             return;
         }
         var target = AppState.Settings.ActiveConfig ?? AppState.Settings.AIConfigs[0];
-        ConfigBox.SelectedItem = selectActive ? target : AppState.Settings.AIConfigs[0];
-    }
-
-    private void ConfigBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        var next = ConfigBox.SelectedItem as AIConfigItem;
-        if (next == _current)
-        {
-            return;
-        }
-        if (_current != null)
-        {
-            WriteFieldsToConfig(_current);
-        }
-        LoadConfigToFields(next);
+        LoadConfigToFields(target);
     }
 
     private void LoadConfigToFields(AIConfigItem? cfg)
     {
         _current = cfg;
+        SyncPresetSelection(cfg);
         var has = cfg != null;
-        ProviderText.Text = has ? $"协议：{cfg!.ProviderDisplay}" : "尚未创建配置，点击“新建配置”选择预设模板。";
-        NameBox.Text = has ? cfg!.Name : "";
         BaseUrlBox.Text = has ? cfg!.ApiBaseUrl : "";
         ApiKeyBox.Password = has ? cfg!.ApiKey : "";
         var model = cfg?.Model ?? "";
@@ -86,14 +91,13 @@ public sealed partial class SettingsPage : Page
         TempSlider.Value = has ? cfg!.Temperature : 0.3;
         PromptBox.Text = has ? cfg!.SystemPrompt : "";
         TempValueText.Text = DescribeTemperature(TempSlider.Value);
-        DeleteButton.IsEnabled = has;
         SaveButton.IsEnabled = has;
         TestButton.IsEnabled = has;
+        UpdateFetchModelsState();
     }
 
     private void WriteFieldsToConfig(AIConfigItem cfg)
     {
-        cfg.Name = string.IsNullOrWhiteSpace(NameBox.Text) ? cfg.Name : NameBox.Text.Trim();
         cfg.ApiBaseUrl = BaseUrlBox.Text.Trim();
         cfg.ApiKey = ApiKeyBox.Password.Trim();
         cfg.Model = ModelBox.Text.Trim();
@@ -101,84 +105,113 @@ public sealed partial class SettingsPage : Page
         cfg.SystemPrompt = PromptBox.Text;
     }
 
-    private void PresetItem_Click(object sender, RoutedEventArgs e)
+    private void SyncPresetSelection(AIConfigItem? cfg)
     {
-        if (sender is not MenuFlyoutItem item || item.Tag is not string tag)
+        _syncingPreset = true;
+        try
+        {
+            var index = -1;
+            if (cfg != null)
+            {
+                for (var i = 0; i < PresetBox.Items.Count; i++)
+                {
+                    if (PresetBox.Items[i] is AIConfigItem t && t.Provider == cfg.Provider)
+                    {
+                        index = i;
+                        break;
+                    }
+                }
+            }
+            PresetBox.SelectedIndex = index;
+        }
+        finally
+        {
+            _syncingPreset = false;
+        }
+    }
+
+    private void PresetBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingPreset || PresetBox.SelectedItem is not AIConfigItem template)
         {
             return;
         }
-        var template = AIPresets.Templates.FirstOrDefault(t => t.Name == tag);
-        if (template == null)
+
+        var cfg = AppState.Settings.AIConfigs.FirstOrDefault(c => c.Provider == template.Provider);
+        if (cfg == null)
         {
+            cfg = new AIConfigItem
+            {
+                Name = template.Name,
+                Provider = template.Provider,
+                ApiBaseUrl = template.ApiBaseUrl
+            };
+            AppState.Settings.AIConfigs.Add(cfg);
+        }
+        AppState.Settings.ActiveConfigName = cfg.Name;
+        RefreshConfigs();
+    }
+
+    private void UpdateFetchModelsState()
+    {
+        var isAnthropic = _current?.Provider == AIProvider.Anthropic;
+        FetchModelsButton.IsEnabled = !isAnthropic;
+        FetchModelsTipText.Visibility = isAnthropic ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private async void FetchModels_Click(object sender, RoutedEventArgs e)
+    {
+        if (_current?.Provider == AIProvider.Anthropic)
+        {
+            ShowBar(InfoBarSeverity.Informational, "Anthropic 协议不支持查询模型列表", "请手动输入模型名称（如 claude-sonnet-4-5）。");
             return;
         }
+
+        var url = BaseUrlBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            ShowBar(InfoBarSeverity.Warning, "接口地址不能为空", "请先填写接口地址 (Base URL)。");
+            return;
+        }
+
         var cfg = new AIConfigItem
         {
-            Name = UniqueName(template.Name),
-            Provider = template.Provider,
-            ApiBaseUrl = template.ApiBaseUrl,
-            ApiKey = template.ApiKey,
-            Model = template.Model,
-            Temperature = template.Temperature,
-            SystemPrompt = template.SystemPrompt
+            Provider = _current?.Provider ?? AIProvider.Custom,
+            ApiBaseUrl = url,
+            ApiKey = ApiKeyBox.Password.Trim()
         };
-        AppState.Settings.AIConfigs.Add(cfg);
-        AppState.Settings.ActiveConfigName = cfg.Name;
-        RefreshConfigs(selectActive: true);
-    }
 
-    private string UniqueName(string baseName)
-    {
-        var existing = AppState.Settings.AIConfigs.Select(c => c.Name).ToHashSet();
-        if (!existing.Contains(baseName))
+        FetchModelsButton.IsEnabled = false;
+        ModelFetchRing.IsActive = true;
+        SaveBar.IsOpen = false;
+        try
         {
-            return baseName;
+            var models = await new AIService().ListModelsAsync(cfg);
+            ModelBox.ItemsSource = models;
+            var currentModel = ModelBox.Text.Trim();
+            ModelBox.SelectedItem = null;
+            if (!string.IsNullOrWhiteSpace(currentModel) && models.Contains(currentModel, StringComparer.OrdinalIgnoreCase))
+            {
+                ModelBox.SelectedItem = models.First(m => m.Equals(currentModel, StringComparison.OrdinalIgnoreCase));
+            }
+            ShowBar(InfoBarSeverity.Success, $"查询到 {models.Count} 个可用模型", "请在下拉列表中选择模型名称（也可继续手动输入）。");
         }
-        var i = 2;
-        while (existing.Contains($"{baseName} {i}"))
+        catch (Exception ex)
         {
-            i++;
+            ShowBar(InfoBarSeverity.Error, "查询模型失败", ex.Message);
         }
-        return $"{baseName} {i}";
-    }
-
-    private async void Delete_Click(object sender, RoutedEventArgs e)
-    {
-        if (_current == null)
+        finally
         {
-            return;
+            FetchModelsButton.IsEnabled = true;
+            ModelFetchRing.IsActive = false;
+            SaveBar.IsOpen = true;
         }
-        var dlg = new ContentDialog
-        {
-            Title = "删除配置",
-            Content = $"确定要删除 AI 配置“{_current.Name}”吗？",
-            PrimaryButtonText = "删除",
-            CloseButtonText = "取消",
-            DefaultButton = ContentDialogButton.Close,
-            XamlRoot = XamlRoot
-        };
-        if (await dlg.ShowAsync() != ContentDialogResult.Primary)
-        {
-            return;
-        }
-        AppState.Settings.AIConfigs.Remove(_current);
-        if (AppState.Settings.ActiveConfigName == _current.Name)
-        {
-            AppState.Settings.ActiveConfigName = AppState.Settings.AIConfigs.FirstOrDefault()?.Name ?? "";
-        }
-        AppState.Settings.Save();
-        RefreshConfigs(selectActive: true);
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)
     {
         if (_current == null)
         {
-            return;
-        }
-        if (string.IsNullOrWhiteSpace(NameBox.Text))
-        {
-            ShowBar(InfoBarSeverity.Warning, "配置名称不能为空", "请先填写配置名称（例如“我的 OpenAI”）。");
             return;
         }
         if (string.IsNullOrWhiteSpace(BaseUrlBox.Text))
@@ -189,7 +222,7 @@ public sealed partial class SettingsPage : Page
         WriteFieldsToConfig(_current);
         AppState.Settings.ActiveConfigName = _current.Name;
         AppState.Settings.Save();
-        RefreshConfigs(selectActive: true);
+        RefreshConfigs();
         ShowBar(InfoBarSeverity.Success, "配置已保存",
             $"配置文件位置：{AppSettings.ConfigFilePath}\n该配置现已出现在“AI 诊断助手”页面的下拉列表中。");
     }

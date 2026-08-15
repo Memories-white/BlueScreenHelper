@@ -576,7 +576,7 @@ public static class DumpParser
     public static string BuildAnalysisText(DumpAnalysisResult r)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("【蓝屏转储文件分析数据】");
+        sb.AppendLine("[蓝屏转储文件分析数据]");
         sb.AppendLine($"- 文件: {r.FilePath}");
         sb.AppendLine($"- 大小: {FormatSize(r.FileSize)}");
         if (r.DumpTime is DateTime t)

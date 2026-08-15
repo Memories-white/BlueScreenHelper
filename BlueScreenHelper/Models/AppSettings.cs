@@ -59,14 +59,14 @@ public static class AIPresets
         "请使用 Markdown 格式组织回答（标题、加粗、列表、代码块），内容用中文。\n" +
         "若数据不足，请明确指出并建议用户补充哪些信息。";
 
-    public static IReadOnlyList<AIConfigItem> Templates => new[]
+    public static readonly IReadOnlyList<AIConfigItem> Templates = new[]
     {
         new AIConfigItem
         {
             Name = "OpenAI",
             Provider = AIProvider.OpenAI,
             ApiBaseUrl = "https://api.openai.com/v1",
-            Model = "gpt-4o-mini",
+            Model = "",
             SystemPrompt = DefaultPrompt
         },
         new AIConfigItem
@@ -74,7 +74,7 @@ public static class AIPresets
             Name = "Anthropic Claude",
             Provider = AIProvider.Anthropic,
             ApiBaseUrl = "https://api.anthropic.com/v1",
-            Model = "claude-sonnet-4-5",
+            Model = "",
             SystemPrompt = DefaultPrompt
         },
         new AIConfigItem
@@ -82,7 +82,7 @@ public static class AIPresets
             Name = "Google Gemini",
             Provider = AIProvider.Gemini,
             ApiBaseUrl = "https://generativelanguage.googleapis.com/v1beta",
-            Model = "gemini-2.0-flash",
+            Model = "",
             SystemPrompt = DefaultPrompt
         },
         new AIConfigItem
@@ -90,7 +90,7 @@ public static class AIPresets
             Name = "自定义",
             Provider = AIProvider.Custom,
             ApiBaseUrl = "http://localhost:11434/v1",
-            Model = "llama3.1",
+            Model = "",
             SystemPrompt = DefaultPrompt
         }
     };

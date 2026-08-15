@@ -64,7 +64,7 @@ public sealed class AIService
                 work.Add(new ChatMessage
                 {
                     Role = "user",
-                    Content = "【系统采集结果】请求了未知工具，请忽略该请求，基于已有信息继续分析，不要再次请求工具。"
+                    Content = "[系统采集结果] 请求了未知工具，请忽略该请求，基于已有信息继续分析，不要再次请求工具。"
                 });
                 continue;
             }
@@ -93,7 +93,7 @@ public sealed class AIService
             work.Add(new ChatMessage
             {
                 Role = "user",
-                Content = $"【系统采集结果 · {tool.Name}】\n{Truncate(result, 6000)}"
+                Content = $"[系统采集结果: {tool.Name}]\n{Truncate(result, 6000)}"
             });
         }
 
@@ -114,6 +114,84 @@ public sealed class AIService
             new() { Role = "user", Content = "请仅回复两个字符：OK" }
         };
         return await ChatAsync(config, history, "你是一个连接测试助手，收到任何消息只回复 OK。", null, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// 查询接口支持哪些模型（OpenAI 兼容 /data[].id、Anthropic /data[].id、Gemini /models[].name）。
+    /// </summary>
+    public async Task<List<string>> ListModelsAsync(AIConfigItem config)
+    {
+        var b = (config.ApiBaseUrl ?? "").Trim().TrimEnd('/');
+        if (b.Length == 0)
+        {
+            throw new InvalidOperationException("接口地址不能为空。");
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(b + "/models"));
+        switch (config.Provider)
+        {
+            case AIProvider.Anthropic:
+                request.Headers.Add("x-api-key", config.ApiKey);
+                request.Headers.Add("anthropic-version", "2023-06-01");
+                break;
+            case AIProvider.Gemini:
+                if (!string.IsNullOrWhiteSpace(config.ApiKey))
+                {
+                    request.Headers.Add("x-goog-api-key", config.ApiKey);
+                }
+                break;
+            default:
+                if (!string.IsNullOrWhiteSpace(config.ApiKey))
+                {
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", config.ApiKey);
+                }
+                break;
+        }
+
+        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            var err = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            throw new InvalidOperationException($"查询模型列表失败 ({(int)response.StatusCode})：{Truncate(err, 300)}");
+        }
+
+        var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        var models = new List<string>();
+
+        if (root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in data.EnumerateArray())
+            {
+                if (item.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String)
+                {
+                    models.Add(id.GetString()!);
+                }
+            }
+        }
+        else if (root.TryGetProperty("models", out var arr) && arr.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in arr.EnumerateArray())
+            {
+                if (item.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String)
+                {
+                    var n = name.GetString()!;
+                    models.Add(n.StartsWith("models/", StringComparison.Ordinal) ? n["models/".Length..] : n);
+                }
+                else if (item.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String)
+                {
+                    models.Add(id.GetString()!);
+                }
+            }
+        }
+
+        if (models.Count == 0)
+        {
+            throw new InvalidOperationException("该接口未返回任何模型，可能不支持模型列表查询，请手动输入模型名称。");
+        }
+        models.Sort(StringComparer.OrdinalIgnoreCase);
+        return models;
     }
 
     // ---------- OpenAI 兼容协议（OpenAI / Custom / Ollama / DeepSeek 等） ----------

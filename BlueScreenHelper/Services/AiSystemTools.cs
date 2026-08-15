@@ -138,10 +138,10 @@ public static class AiSystemTools
         {
             var sb = new StringBuilder();
             sb.AppendLine();
-            sb.AppendLine("【可用系统工具】");
+            sb.AppendLine("[可用系统工具]");
             sb.AppendLine("本软件已内置系统数据采集能力。当你的分析需要本机真实数据（蓝屏记录、事件日志、磁盘状态等）时，必须按以下规则请求工具：");
             sb.AppendLine("- 在回复中单独输出一行 [[TOOL:工具键]]，该行不得包含其他任何内容；");
-            sb.AppendLine("- 工具执行后，结果会以【系统采集结果】开头自动追加到对话中，请基于返回的真实数据继续分析；");
+            sb.AppendLine("- 工具执行后，结果会以[系统采集结果]开头自动追加到对话中，请基于返回的真实数据继续分析；");
             sb.AppendLine("- 严禁编造或猜测系统数据；严禁建议用户手动打开事件查看器、安装调试工具或自行导出日志（本软件已内置全部采集能力）；");
             sb.AppendLine("- 可以依次请求多个工具，拿到全部所需结果后再输出最终分析；不要重复请求同一工具。");
             sb.AppendLine("可用工具：");
