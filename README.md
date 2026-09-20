@@ -24,8 +24,8 @@
 | 🖥️ **首页** | 系统关键信息概览（版本、CPU、内存、启动时间）、最近崩溃记录，双击查看详情 |
 | 📄 **转储分析** | 解析 `.dmp` 文件（MDMP 小转储 / PAGE 内核转储），提取崩溃代码、参数、异常信息、时间、系统版本，生成分析报告 |
 | 🔍 **系统扫描** | 检查关键事件日志（BugCheck、WHEA、磁盘错误、内存诊断）、SMART 健康状态、磁盘空间、崩溃转储文件、待重启状态 |
-| 🤖 **AI 诊断** | 对接任意 OpenAI 兼容 API（OpenAI / DeepSeek / 智谱 / Moonshot / 通义 / SiliconFlow / Ollama 等），流式输出问题定位与解决方案 |
-| ⚙️ **设置** | 配置 API 地址、密钥、模型、温度与系统提示词（存储于 `%LOCALAPPDATA%\BlueScreenHelper\settings.json`） |
+| 🤖 **AI 诊断** | 使用 DeepSeek 的 OpenAI / Anthropic 兼容 API，流式输出问题定位与解决方案 |
+| ⚙️ **设置** | 配置 API 地址与密钥后自动查询并选择可用模型，也可调整温度和系统提示词（存储于 `%LOCALAPPDATA%\BlueScreenHelper\settings.json`） |
 
 ### 转储解析细节
 
@@ -49,7 +49,7 @@
 | 平台支持 | x86 / x64 / ARM64（默认 x64，csproj 内处理 AnyCPU → x64 映射） |
 | 系统 API | System.Diagnostics.EventLog、System.Management（WMI / SMART） |
 | 转储解析 | 自研二进制解析（MDMP + PAGE/DU64），零第三方依赖 |
-| AI 集成 | OpenAI 兼容 Chat Completions API（SSE 流式输出） |
+| AI 集成 | DeepSeek OpenAI / Anthropic 兼容 API（SSE 流式输出） |
 | 安装程序 | Inno Setup 6（`installer/installer.iss`） |
 | CI/CD | GitHub Actions（`.github/workflows/build.yml`） |
 
@@ -118,7 +118,7 @@ BlueScreenHelper/
 
 1. 打开「转储分析」页，选择 `C:\Windows\Minidump\*.dmp`（小转储）或 `C:\Windows\MEMORY.DMP`（内核转储）→ 自动解析显示崩溃代码、参数注解、时间、系统版本与转储类型
 2. 「系统扫描」页点击「开始扫描」，逐项检查事件日志、磁盘健康（SMART）、磁盘空间与转储文件
-3. 「设置」页填写 AI API 地址（如 `https://api.deepseek.com/v1`）、密钥与模型，然后在「AI 诊断」页提交崩溃报告获取解决方案（支持本地 Ollama：`http://localhost:11434/v1`）
+3. 「设置」页选择 DeepSeek 的 OpenAI 或 Anthropic 格式，填写 API Key 后自动查询模型，然后在「AI 诊断」页提交崩溃报告获取解决方案
 
 ---
 

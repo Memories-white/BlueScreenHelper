@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Text;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using BlueScreenHelper.Services;
 using Microsoft.UI.Xaml;
@@ -9,15 +11,28 @@ public enum AIProvider
 {
     OpenAI,
     Anthropic,
+    // 保留旧值以兼容已经保存的配置；加载后统一迁移为 OpenAI 协议。
     Gemini,
     Custom
+}
+
+public static class DeepSeekEndpoints
+{
+    public const string OpenAI = "https://api.deepseek.com";
+    public const string Anthropic = "https://api.deepseek.com/anthropic";
+
+    public static AIProvider NormalizeProvider(AIProvider provider) =>
+        provider == AIProvider.Anthropic ? AIProvider.Anthropic : AIProvider.OpenAI;
+
+    public static string ForProvider(AIProvider provider) =>
+        NormalizeProvider(provider) == AIProvider.Anthropic ? Anthropic : OpenAI;
 }
 
 public sealed class AIConfigItem
 {
     public string Name { get; set; } = "";
     public AIProvider Provider { get; set; } = AIProvider.OpenAI;
-    public string ApiBaseUrl { get; set; } = "";
+    public string ApiBaseUrl { get; set; } = DeepSeekEndpoints.OpenAI;
     public string ApiKey { get; set; } = "";
     public string Model { get; set; } = "";
     public double Temperature { get; set; } = 0.3;
@@ -26,10 +41,8 @@ public sealed class AIConfigItem
     [JsonIgnore]
     public string ProviderDisplay => Provider switch
     {
-        AIProvider.Anthropic => "Anthropic 协议",
-        AIProvider.Gemini => "Gemini 协议",
-        AIProvider.Custom => "自定义（OpenAI 兼容，如 Ollama）",
-        _ => "OpenAI 协议"
+        AIProvider.Anthropic => "DeepSeek（Anthropic 格式）",
+        _ => "DeepSeek（OpenAI 格式）"
     };
 }
 
@@ -63,33 +76,17 @@ public static class AIPresets
     {
         new AIConfigItem
         {
-            Name = "OpenAI",
+            Name = "DeepSeek（OpenAI）",
             Provider = AIProvider.OpenAI,
-            ApiBaseUrl = "https://api.openai.com/v1",
+            ApiBaseUrl = DeepSeekEndpoints.OpenAI,
             Model = "",
             SystemPrompt = DefaultPrompt
         },
         new AIConfigItem
         {
-            Name = "Anthropic Claude",
+            Name = "DeepSeek（Anthropic）",
             Provider = AIProvider.Anthropic,
-            ApiBaseUrl = "https://api.anthropic.com/v1",
-            Model = "",
-            SystemPrompt = DefaultPrompt
-        },
-        new AIConfigItem
-        {
-            Name = "Google Gemini",
-            Provider = AIProvider.Gemini,
-            ApiBaseUrl = "https://generativelanguage.googleapis.com/v1beta",
-            Model = "",
-            SystemPrompt = DefaultPrompt
-        },
-        new AIConfigItem
-        {
-            Name = "自定义",
-            Provider = AIProvider.Custom,
-            ApiBaseUrl = "http://localhost:11434/v1",
+            ApiBaseUrl = DeepSeekEndpoints.Anthropic,
             Model = "",
             SystemPrompt = DefaultPrompt
         }
@@ -98,6 +95,8 @@ public static class AIPresets
 
 public sealed class AppSettings
 {
+    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+
     public bool WelcomeDismissed { get; set; }
     public List<AIConfigItem> AIConfigs { get; set; } = new();
     public string ActiveConfigName { get; set; } = "";
@@ -107,9 +106,9 @@ public sealed class AppSettings
         AIConfigs.FirstOrDefault(c => c.Name == ActiveConfigName)
         ?? AIConfigs.FirstOrDefault();
 
-    public string ApiBaseUrl { get; set; } = "https://api.openai.com/v1";
+    public string ApiBaseUrl { get; set; } = DeepSeekEndpoints.OpenAI;
     public string ApiKey { get; set; } = "";
-    public string Model { get; set; } = "gpt-4o-mini";
+    public string Model { get; set; } = "";
     public double Temperature { get; set; } = 0.3;
     public string SystemPrompt { get; set; } = AIPresets.DefaultPrompt;
 
@@ -122,8 +121,10 @@ public sealed class AppSettings
             var path = Path.Combine(dir, "settings.json");
             if (File.Exists(path))
             {
-                var s = System.Text.Json.JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(path)) ?? new AppSettings();
+                using var stream = File.OpenRead(path);
+                var s = JsonSerializer.Deserialize<AppSettings>(stream) ?? new AppSettings();
                 s.MigrateLegacySettings();
+                s.RestrictToDeepSeekEndpoints();
                 s.UpgradePrompts();
                 return s;
             }
@@ -140,19 +141,43 @@ public sealed class AppSettings
         {
             return;
         }
-        if (!string.IsNullOrWhiteSpace(ApiKey) || !string.Equals(Model, "gpt-4o-mini", StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(ApiKey) || !string.IsNullOrWhiteSpace(Model))
         {
             AIConfigs.Add(new AIConfigItem
             {
-                Name = "自定义",
-                Provider = AIProvider.Custom,
-                ApiBaseUrl = string.IsNullOrWhiteSpace(ApiBaseUrl) ? "https://api.openai.com/v1" : ApiBaseUrl,
+                Name = "DeepSeek（OpenAI）",
+                Provider = AIProvider.OpenAI,
+                ApiBaseUrl = DeepSeekEndpoints.OpenAI,
                 ApiKey = ApiKey,
                 Model = Model,
                 Temperature = Temperature,
                 SystemPrompt = SystemPrompt
             });
             ActiveConfigName = "自定义";
+            Save();
+        }
+    }
+
+    private void RestrictToDeepSeekEndpoints()
+    {
+        var changed = false;
+        foreach (var cfg in AIConfigs)
+        {
+            var provider = DeepSeekEndpoints.NormalizeProvider(cfg.Provider);
+            var baseUrl = DeepSeekEndpoints.ForProvider(provider);
+            if (cfg.Provider != provider)
+            {
+                cfg.Provider = provider;
+                changed = true;
+            }
+            if (!string.Equals(cfg.ApiBaseUrl, baseUrl, StringComparison.Ordinal))
+            {
+                cfg.ApiBaseUrl = baseUrl;
+                changed = true;
+            }
+        }
+        if (changed)
+        {
             Save();
         }
     }
@@ -185,7 +210,8 @@ public sealed class AppSettings
             var dir = SettingsDir;
             Directory.CreateDirectory(dir);
             var path = Path.Combine(dir, "settings.json");
-            File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(this, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+            using var stream = File.Create(path);
+            JsonSerializer.Serialize(stream, this, JsonOptions);
         }
         catch
         {
@@ -205,6 +231,7 @@ public sealed class AppSettings
 public sealed class ChatMessage : INotifyPropertyChanged
 {
     private string _content = "";
+    private StringBuilder? _pendingContent;
     private DateTime _lastRender = DateTime.MinValue;
     private UIElement? _rendered;
 
@@ -212,12 +239,13 @@ public sealed class ChatMessage : INotifyPropertyChanged
 
     public string Content
     {
-        get => _content;
+        get => _pendingContent?.ToString() ?? _content;
         set
         {
-            if (_content != value)
+            if (Content != value)
             {
                 _content = value;
+                _pendingContent = null;
                 RebuildRender();
             }
         }
@@ -235,7 +263,8 @@ public sealed class ChatMessage : INotifyPropertyChanged
 
     public void AppendContent(string delta)
     {
-        _content += delta;
+        _pendingContent ??= new StringBuilder(_content, _content.Length + Math.Max(delta.Length, 256));
+        _pendingContent.Append(delta);
         var now = DateTime.UtcNow;
         if (now - _lastRender > TimeSpan.FromMilliseconds(200))
         {
@@ -251,6 +280,11 @@ public sealed class ChatMessage : INotifyPropertyChanged
 
     private void RebuildRender()
     {
+        if (_pendingContent != null)
+        {
+            _content = _pendingContent.ToString();
+            _pendingContent = null;
+        }
         _rendered = MarkdownRenderer.Render(_content);
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Rendered)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Content)));
@@ -280,6 +314,8 @@ public sealed class ChatSession
 
 public static class ChatSessionStore
 {
+    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+
     private sealed class SessionFile
     {
         public List<ChatSession> Sessions { get; set; } = new();
@@ -292,7 +328,8 @@ public static class ChatSessionStore
             var path = AppSettings.SessionsFilePath;
             if (File.Exists(path))
             {
-                var file = System.Text.Json.JsonSerializer.Deserialize<SessionFile>(File.ReadAllText(path));
+                using var stream = File.OpenRead(path);
+                var file = JsonSerializer.Deserialize<SessionFile>(stream);
                 return file?.Sessions ?? new List<ChatSession>();
             }
         }
@@ -312,8 +349,8 @@ public static class ChatSessionStore
                 Directory.CreateDirectory(dir);
             }
             var file = new SessionFile { Sessions = sessions };
-            File.WriteAllText(AppSettings.SessionsFilePath,
-                System.Text.Json.JsonSerializer.Serialize(file, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+            using var stream = File.Create(AppSettings.SessionsFilePath);
+            JsonSerializer.Serialize(stream, file, JsonOptions);
         }
         catch
         {

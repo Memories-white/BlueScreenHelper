@@ -2,7 +2,8 @@
     x:Class="BlueScreenHelper.Views.SettingsPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    Loaded="Page_Loaded">
+    Loaded="Page_Loaded"
+    Unloaded="Page_Unloaded">
 
     <Page.Resources>
         <Style x:Key="CardStyle" TargetType="Border">
@@ -21,7 +22,7 @@
     <ScrollViewer>
         <StackPanel Padding="24,16,24,24" Spacing="14">
             <TextBlock Text="设置" FontSize="28" FontWeight="Bold" />
-            <TextBlock Text="配置 AI 服务接口，用于崩溃分析与系统诊断。可保存多套配置，预设模板开箱即用。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <TextBlock Text="通过 DeepSeek 的 OpenAI 或 Anthropic 兼容接口进行崩溃分析与系统诊断。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
 
             <Border Style="{StaticResource CardStyle}">
                 <StackPanel>
@@ -34,12 +35,13 @@
                     </StackPanel>
 
                     <TextBlock Style="{StaticResource FieldLabel}" Text="接口地址 (Base URL)" />
-                    <TextBox x:Name="BaseUrlBox" PlaceholderText="https://api.openai.com/v1" />
+                    <TextBox x:Name="BaseUrlBox" IsReadOnly="True" />
 
-                    <TextBlock Style="{StaticResource FieldLabel}" Text="API Key（本地服务如 Ollama 可留空）" />
-                    <PasswordBox x:Name="ApiKeyBox" PlaceholderText="sk-..." />
+                    <TextBlock Style="{StaticResource FieldLabel}" Text="DeepSeek API Key" />
+                    <PasswordBox x:Name="ApiKeyBox" PlaceholderText="sk-..."
+                                 PasswordChanged="ApiKeyBox_PasswordChanged" />
 
-                    <TextBlock Style="{StaticResource FieldLabel}" Text="模型名称（可手动输入，或点击“查询模型”自动获取该地址可用的模型后选择）" />
+                    <TextBlock Style="{StaticResource FieldLabel}" Text="模型名称（填写接口地址和密钥后自动查询，也可手动查询或输入）" />
                     <StackPanel Orientation="Horizontal" Spacing="10">
                         <ComboBox x:Name="ModelBox" IsEditable="True" Width="300" HorizontalAlignment="Left" />
                         <Button x:Name="FetchModelsButton" Click="FetchModels_Click" VerticalAlignment="Center">
@@ -48,11 +50,11 @@
                                 <TextBlock Text="查询模型" VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
-                        <TextBlock x:Name="FetchModelsTipText" Visibility="Collapsed" VerticalAlignment="Center" FontSize="12"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                   Text="Anthropic 协议无模型列表接口，请手动输入模型名称" />
                         <ProgressRing x:Name="ModelFetchRing" IsActive="False" Width="22" Height="22" VerticalAlignment="Center" />
                     </StackPanel>
+                    <TextBlock x:Name="AutoModelStatusText" Margin="0,5,0,0" FontSize="12"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               Text="填写完整的 API 信息后，将自动查询并选择可用模型。" />
 
                     <TextBlock Style="{StaticResource FieldLabel}" Text="发散度（0-1，值越低回答越严谨收敛，值越高越自由发散）" />
                     <Slider x:Name="TempSlider" Minimum="0" Maximum="1" StepFrequency="0.05" Width="300" HorizontalAlignment="Left" />
@@ -84,13 +86,11 @@
 
             <Border Style="{StaticResource CardStyle}">
                 <StackPanel>
-                    <TextBlock Text="支持的接口协议" FontSize="18" FontWeight="SemiBold" />
-                    <TextBlock Text="预设覆盖主流协议，自定义项兼容任意 OpenAI 协议接口："
+                    <TextBlock Text="固定接口地址" FontSize="18" FontWeight="SemiBold" />
+                    <TextBlock Text="应用仅使用以下两个 DeepSeek 官方 Base URL："
                                Margin="0,8,0,4" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <TextBlock Text="• OpenAI 协议：OpenAI、DeepSeek、智谱、Moonshot、通义、SiliconFlow 等" TextWrapping="Wrap" />
-                    <TextBlock Text="• Anthropic 协议：Anthropic Claude（claude 系列模型）" TextWrapping="Wrap" />
-                    <TextBlock Text="• Gemini 协议：Google Gemini（gemini 系列模型）" TextWrapping="Wrap" />
-                    <TextBlock Text="• 自定义（OpenAI 兼容）：Ollama 本地（http://localhost:11434/v1，如 llama3.1）、vLLM、LM Studio 等" TextWrapping="Wrap" />
+                    <TextBlock Text="• OpenAI 格式：https://api.deepseek.com" TextWrapping="Wrap" />
+                    <TextBlock Text="• Anthropic 格式：https://api.deepseek.com/anthropic" TextWrapping="Wrap" />
                     <TextBlock Text="配置保存位置：%LOCALAPPDATA%\BlueScreenHelper\settings.json（仅保存在本机，不会上传）"
                                Margin="0,10,0,0" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 </StackPanel>

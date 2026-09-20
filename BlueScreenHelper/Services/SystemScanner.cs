@@ -3,7 +3,6 @@ using System.Diagnostics.Eventing.Reader;
 using System.Management;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Text.RegularExpressions;
 using BlueScreenHelper.Models;
 using Microsoft.Win32;
 
@@ -111,23 +110,16 @@ public static class SystemScanner
         var events = QueryEvents("System",
             "*[System[(EventID=1001) and TimeCreated[timediff(@SystemTime) <= 2592000000]]]", 20);
 
-        var bugChecks = new List<(string Code, string Name, DateTime? Time, string? Driver)>();
+        var bugChecks = new List<(uint Code, string CodeHex, string Name, DateTime? Time, string? Driver)>();
         foreach (var e in events)
         {
             var desc = e.Description ?? "";
-            if (!desc.Contains("0x", StringComparison.OrdinalIgnoreCase))
+            if (!SystemEventParser.TryParseBugCheck(desc, out var code, out var driver))
             {
                 continue;
             }
-            var m = Regex.Match(desc, @"0x([0-9A-Fa-f]{8})");
-            if (!m.Success)
-            {
-                continue;
-            }
-            var code = Convert.ToUInt32(m.Groups[1].Value, 16);
             var entry = BugCheckDatabase.Get(code);
-            var driverMatch = Regex.Match(desc, @"([a-zA-Z0-9_\-]+\.sys)", RegexOptions.IgnoreCase);
-            bugChecks.Add((entry?.CodeHex ?? $"0x{code:X8}", entry?.Name ?? "未知错误", e.Time, driverMatch.Success ? driverMatch.Groups[1].Value : null));
+            bugChecks.Add((code, entry?.CodeHex ?? $"0x{code:X8}", entry?.Name ?? "未知错误", e.Time, driver));
         }
 
         if (bugChecks.Count == 0)
@@ -143,13 +135,13 @@ public static class SystemScanner
             return;
         }
 
-        foreach (var (code, name, time, driver) in bugChecks.Take(5))
+        foreach (var (code, codeHex, name, time, driver) in bugChecks.Take(5))
         {
-            var entry = BugCheckDatabase.Get(Convert.ToUInt32(code.Substring(2), 16));
+            var entry = BugCheckDatabase.Get(code);
             issues.Add(new ScanIssue
             {
                 Category = "崩溃记录",
-                Title = $"检测到蓝屏：{code} {name}",
+                Title = $"检测到蓝屏：{codeHex} {name}",
                 Severity = IssueSeverity.Critical,
                 DetectedAt = time,
                 Description = $"崩溃时间：{time:yyyy-MM-dd HH:mm:ss}{(driver != null ? $"\n转储报告中涉及的驱动：{driver}" : "")}\n{entry?.Description ?? "知识库未收录该错误代码。"}",
@@ -171,7 +163,8 @@ public static class SystemScanner
         });
     }
 
-    private static string BuildBugCheckDetail(List<(string Code, string Name, DateTime? Time, string? Driver)> bugChecks)
+    private static string BuildBugCheckDetail(
+        List<(uint Code, string CodeHex, string Name, DateTime? Time, string? Driver)> bugChecks)
     {
         if (bugChecks.Count == 0)
         {
@@ -179,13 +172,13 @@ public static class SystemScanner
         }
         var sb = new StringBuilder();
         sb.AppendLine($"共记录 {bugChecks.Count} 次 BugCheck，按时间倒序：");
-        foreach (var (code, name, time, driver) in bugChecks)
+        foreach (var (_, codeHex, name, time, driver) in bugChecks)
         {
-            sb.AppendLine($"  {time:yyyy-MM-dd HH:mm}  {code} {name}{(driver != null ? $"（涉及驱动 {driver}）" : "")}");
+            sb.AppendLine($"  {time:yyyy-MM-dd HH:mm}  {codeHex} {name}{(driver != null ? $"（涉及驱动 {driver}）" : "")}");
         }
         var freq = bugChecks.GroupBy(b => b.Code).OrderByDescending(g => g.Count()).First();
         sb.AppendLine();
-        sb.AppendLine($"最常见错误：{freq.Key} {freq.First().Name}，共 {freq.Count()} 次。");
+        sb.AppendLine($"最常见错误：{freq.First().CodeHex} {freq.First().Name}，共 {freq.Count()} 次。");
         sb.AppendLine($"统计范围：近 30 天系统日志（Event ID 1001，来源 BugCheck）。");
         return sb.ToString();
     }
@@ -351,7 +344,6 @@ public static class SystemScanner
             return;
         }
         var desc = events[0].Description ?? "";
-        var devMatch = Regex.Match(desc, @"(\S+\s+\S+)\s+加载失败", RegexOptions.IgnoreCase);
         issues.Add(new ScanIssue
         {
             Category = "驱动程序",
@@ -369,27 +361,16 @@ public static class SystemScanner
     {
         try
         {
-            var scope = new ManagementScope(@"\\.\root\WMI");
-            using var searcher = new ManagementObjectSearcher(scope, new ObjectQuery("SELECT * FROM MSStorageDriver_FailurePredictStatus"));
-            var failed = new List<string>();
-            foreach (var o in searcher.Get())
-            {
-                using var mo = (ManagementObject)o;
-                if (mo["PredictFailure"] is bool predict && predict)
-                {
-                    var name = Convert.ToString(mo["InstanceName"]) ?? "未知磁盘";
-                    failed.Add(name);
-                }
-            }
-            if (failed.Count > 0)
+            var status = SystemStorageReader.GetSmartSnapshot();
+            if (status.FailedDevices.Count > 0)
             {
                 issues.Add(new ScanIssue
                 {
                     Category = "存储",
                     Title = "SMART 预测磁盘即将发生故障",
                     Severity = IssueSeverity.Critical,
-                    Description = "以下磁盘的 SMART 自检已标记预测性故障：\n" + string.Join("\n", failed),
-                    Detail = string.Join("\n", failed.Select(f => $"磁盘：{f}")),
+                    Description = "以下磁盘的 SMART 自检已标记预测性故障：\n" + string.Join("\n", status.FailedDevices),
+                    Detail = string.Join("\n", status.FailedDevices.Select(f => $"磁盘：{f}")),
                     Recommendation = "立即备份该磁盘数据，并使用官方工具（如 CrystalDiskInfo、厂商诊断工具）确认，及时更换磁盘。"
                 });
             }
@@ -411,29 +392,25 @@ public static class SystemScanner
     {
         try
         {
-            using var searcher = new ManagementObjectSearcher("SELECT * FROM Win32_LogicalDisk WHERE DriveType=3");
+            var disks = SystemStorageReader.GetLogicalDisks();
             var diskInfo = new StringBuilder();
-            foreach (var o in searcher.Get())
+            foreach (var disk in disks)
             {
-                using var mo = (ManagementObject)o;
-                var id = Convert.ToString(mo["DeviceID"]) ?? "";
-                var total = Convert.ToUInt64(mo["Size"] ?? 0UL);
-                var free = Convert.ToUInt64(mo["FreeSpace"] ?? 0UL);
-                if (total == 0)
-                {
-                    continue;
-                }
-                var usedPercent = (double)(total - free) / total * 100.0;
-                diskInfo.AppendLine($"  {id}：已用 {usedPercent:F1}%（剩余 {free / 1073741824.0:F1} GB / 共 {total / 1073741824.0:F1} GB）");
-                if (usedPercent >= 90)
+                diskInfo.AppendLine($"  {disk.Id}：已用 {disk.UsedPercent:F1}%（剩余 {disk.FreeBytes / 1073741824.0:F1} GB / 共 {disk.TotalBytes / 1073741824.0:F1} GB）");
+            }
+
+            var detail = "分区使用情况：\n" + diskInfo;
+            foreach (var disk in disks)
+            {
+                if (disk.UsedPercent >= 90)
                 {
                     issues.Add(new ScanIssue
                     {
                         Category = "存储",
-                        Title = $"磁盘 {id} 空间不足",
+                        Title = $"磁盘 {disk.Id} 空间不足",
                         Severity = IssueSeverity.Warning,
-                        Description = $"已用空间 {usedPercent:F1}%（剩余 {free / 1073741824.0:F1} GB / 共 {total / 1073741824.0:F1} GB）。",
-                        Detail = "分区使用情况：\n" + diskInfo,
+                        Description = $"已用空间 {disk.UsedPercent:F1}%（剩余 {disk.FreeBytes / 1073741824.0:F1} GB / 共 {disk.TotalBytes / 1073741824.0:F1} GB）。",
+                        Detail = detail,
                         Recommendation = "清理临时文件与大型文件；空间不足会影响系统稳定性与页面文件。"
                     });
                 }
@@ -452,7 +429,7 @@ public static class SystemScanner
         var groups = events
             .Select(e => new
             {
-                App = ExtractAppName(e.Description ?? ""),
+                App = SystemEventParser.ExtractApplicationName(e.Description ?? ""),
                 e.Time,
                 e.Id
             })
@@ -485,7 +462,7 @@ public static class SystemScanner
         try
         {
             using var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired");
-            if (key != null || Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired") != null)
+            if (key != null)
             {
                 issues.Add(new ScanIssue
                 {
@@ -500,17 +477,6 @@ public static class SystemScanner
         catch
         {
         }
-    }
-
-    private static string ExtractAppName(string description)
-    {
-        var m = Regex.Match(description, @"应用程序名称:\s*([^\s,]+\.exe)", RegexOptions.IgnoreCase);
-        if (m.Success)
-        {
-            return m.Groups[1].Value;
-        }
-        m = Regex.Match(description, @"faulting application name:\s*([^\s,]+\.exe)", RegexOptions.IgnoreCase);
-        return m.Success ? m.Groups[1].Value : "";
     }
 
     internal static string BuildEventDetail(List<EventInfo> events, string title, string note)

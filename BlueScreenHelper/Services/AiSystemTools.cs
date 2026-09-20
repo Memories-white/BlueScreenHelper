@@ -1,6 +1,4 @@
-using System.Management;
 using System.Text;
-using System.Text.RegularExpressions;
 using BlueScreenHelper.Models;
 using Microsoft.Win32;
 
@@ -127,30 +125,34 @@ public static class AiSystemTools
         }
     };
 
+    private static readonly IReadOnlyDictionary<string, AiToolDef> ToolsByKey =
+        Tools.ToDictionary(tool => tool.Key, StringComparer.OrdinalIgnoreCase);
+
+    private static readonly string ToolInstructions = BuildInstructions();
+
     public static AiToolDef? Find(string key)
     {
-        return Tools.FirstOrDefault(t => t.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
+        return ToolsByKey.GetValueOrDefault(key);
     }
 
-    public static string Instructions
+    public static string Instructions => ToolInstructions;
+
+    private static string BuildInstructions()
     {
-        get
+        var sb = new StringBuilder();
+        sb.AppendLine();
+        sb.AppendLine("[可用系统工具]");
+        sb.AppendLine("本软件已内置系统数据采集能力。当你的分析需要本机真实数据（蓝屏记录、事件日志、磁盘状态等）时，必须按以下规则请求工具：");
+        sb.AppendLine("- 在回复中单独输出一行 [[TOOL:工具键]]，该行不得包含其他任何内容；");
+        sb.AppendLine("- 工具执行后，结果会以[系统采集结果]开头自动追加到对话中，请基于返回的真实数据继续分析；");
+        sb.AppendLine("- 严禁编造或猜测系统数据；严禁建议用户手动打开事件查看器、安装调试工具或自行导出日志（本软件已内置全部采集能力）；");
+        sb.AppendLine("- 可以依次请求多个工具，拿到全部所需结果后再输出最终分析；不要重复请求同一工具。");
+        sb.AppendLine("可用工具：");
+        foreach (var tool in Tools)
         {
-            var sb = new StringBuilder();
-            sb.AppendLine();
-            sb.AppendLine("[可用系统工具]");
-            sb.AppendLine("本软件已内置系统数据采集能力。当你的分析需要本机真实数据（蓝屏记录、事件日志、磁盘状态等）时，必须按以下规则请求工具：");
-            sb.AppendLine("- 在回复中单独输出一行 [[TOOL:工具键]]，该行不得包含其他任何内容；");
-            sb.AppendLine("- 工具执行后，结果会以[系统采集结果]开头自动追加到对话中，请基于返回的真实数据继续分析；");
-            sb.AppendLine("- 严禁编造或猜测系统数据；严禁建议用户手动打开事件查看器、安装调试工具或自行导出日志（本软件已内置全部采集能力）；");
-            sb.AppendLine("- 可以依次请求多个工具，拿到全部所需结果后再输出最终分析；不要重复请求同一工具。");
-            sb.AppendLine("可用工具：");
-            foreach (var t in Tools)
-            {
-                sb.AppendLine($"- [[TOOL:{t.Key}]]：{t.Description}");
-            }
-            return sb.ToString();
+            sb.AppendLine($"- [[TOOL:{tool.Key}]]：{tool.Description}");
         }
+        return sb.ToString();
     }
 
     // ---------- 工具实现 ----------
@@ -178,17 +180,14 @@ public static class AiSystemTools
         foreach (var e in events)
         {
             var desc = e.Description ?? "";
-            var m = Regex.Match(desc, @"0x([0-9A-Fa-f]{8})");
-            if (!m.Success)
+            if (!SystemEventParser.TryParseBugCheck(desc, out var code, out var driver))
             {
                 continue;
             }
             count++;
-            var code = Convert.ToUInt32(m.Groups[1].Value, 16);
             var entry = BugCheckDatabase.Get(code);
-            var dm = Regex.Match(desc, @"([a-zA-Z0-9_\-]+\.sys)", RegexOptions.IgnoreCase);
             sb.AppendLine($"{e.Time:yyyy-MM-dd HH:mm}  {entry?.CodeHex ?? $"0x{code:X8}"} {entry?.Name ?? "未知错误"}" +
-                          (dm.Success ? $"（涉及驱动 {dm.Groups[1].Value}）" : ""));
+                          (driver != null ? $"（涉及驱动 {driver}）" : ""));
         }
 
         var dumpLine = "";
@@ -291,58 +290,37 @@ public static class AiSystemTools
 
     private static string GetDiskSpace()
     {
-        var sb = new StringBuilder();
-        var count = 0;
         try
         {
-            using var searcher = new ManagementObjectSearcher("SELECT * FROM Win32_LogicalDisk WHERE DriveType=3");
-            foreach (var o in searcher.Get())
+            var disks = SystemStorageReader.GetLogicalDisks();
+            if (disks.Count == 0)
             {
-                using var mo = (ManagementObject)o;
-                var id = Convert.ToString(mo["DeviceID"]) ?? "";
-                var total = Convert.ToUInt64(mo["Size"] ?? 0UL);
-                var free = Convert.ToUInt64(mo["FreeSpace"] ?? 0UL);
-                if (total == 0)
-                {
-                    continue;
-                }
-                count++;
-                var usedPercent = (double)(total - free) / total * 100.0;
-                sb.AppendLine($"{id}：已用 {usedPercent:F1}%，剩余 {free / 1073741824.0:F1} GB / 共 {total / 1073741824.0:F1} GB");
+                return "无法读取磁盘分区信息。";
             }
+
+            var sb = new StringBuilder(disks.Count * 64);
+            foreach (var disk in disks)
+            {
+                sb.AppendLine($"{disk.Id}：已用 {disk.UsedPercent:F1}%，剩余 {disk.FreeBytes / 1073741824.0:F1} GB / 共 {disk.TotalBytes / 1073741824.0:F1} GB");
+            }
+            return sb.ToString().TrimEnd();
         }
         catch
         {
+            return "无法读取磁盘分区信息。";
         }
-        return count == 0 ? "无法读取磁盘分区信息。" : sb.ToString().TrimEnd();
     }
 
     private static string GetSmartStatus()
     {
         try
         {
-            var scope = new ManagementScope(@"\\.\root\WMI");
-            using var searcher = new ManagementObjectSearcher(scope, new ObjectQuery("SELECT * FROM MSStorageDriver_FailurePredictStatus"));
-            var failed = new List<string>();
-            var healthy = 0;
-            foreach (var o in searcher.Get())
+            var status = SystemStorageReader.GetSmartSnapshot();
+            if (status.FailedDevices.Count > 0)
             {
-                using var mo = (ManagementObject)o;
-                var name = Convert.ToString(mo["InstanceName"]) ?? "未知磁盘";
-                if (mo["PredictFailure"] is bool predict && predict)
-                {
-                    failed.Add(name);
-                }
-                else
-                {
-                    healthy++;
-                }
+                return $"SMART 预警：以下磁盘被标记为预测性故障，请立即备份数据并更换：\n{string.Join("\n", status.FailedDevices.Select(f => $"  {f}"))}";
             }
-            if (failed.Count > 0)
-            {
-                return $"SMART 预警：以下磁盘被标记为预测性故障，请立即备份数据并更换：\n{string.Join("\n", failed.Select(f => $"  {f}"))}";
-            }
-            return $"SMART 状态：共检查 {healthy + failed.Count} 块磁盘，全部正常。";
+            return $"SMART 状态：共检查 {status.DeviceCount} 块磁盘，全部正常。";
         }
         catch
         {
@@ -356,7 +334,7 @@ public static class AiSystemTools
             "*[System[(EventID=1000 or EventID=1001 or EventID=1002 or EventID=1003 or EventID=1026) and Level<=3 and TimeCreated[timediff(@SystemTime) <= 604800000]]]", 30);
 
         var groups = events
-            .Select(e => new { App = ExtractAppName(e.Description ?? ""), e.Time })
+            .Select(e => new { App = SystemEventParser.ExtractApplicationName(e.Description ?? ""), e.Time })
             .Where(x => !string.IsNullOrEmpty(x.App))
             .GroupBy(x => x.App)
             .Select(g => new { App = g.Key, Count = g.Count(), Latest = g.Max(x => x.Time) })
@@ -375,17 +353,6 @@ public static class AiSystemTools
             sb.AppendLine($"  {g.App}：{g.Count} 次（最近 {g.Latest:yyyy-MM-dd HH:mm}）");
         }
         return sb.ToString().TrimEnd();
-    }
-
-    private static string ExtractAppName(string description)
-    {
-        var m = Regex.Match(description, @"应用程序名称:\s*([^\s,]+\.exe)", RegexOptions.IgnoreCase);
-        if (m.Success)
-        {
-            return m.Groups[1].Value;
-        }
-        m = Regex.Match(description, @"faulting application name:\s*([^\s,]+\.exe)", RegexOptions.IgnoreCase);
-        return m.Success ? m.Groups[1].Value : "";
     }
 
     private static string GetPendingReboot()

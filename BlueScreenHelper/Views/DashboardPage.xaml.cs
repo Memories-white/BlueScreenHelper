@@ -1,7 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics.Eventing.Reader;
 using System.Text;
-using System.Text.RegularExpressions;
 using BlueScreenHelper.Models;
 using BlueScreenHelper.Services;
 using Microsoft.UI.Text;
@@ -113,12 +112,10 @@ public sealed partial class DashboardPage : Page
                 catch
                 {
                 }
-                var m = Regex.Match(desc, @"0x([0-9A-Fa-f]{8})");
-                if (!m.Success)
+                if (!SystemEventParser.TryParseBugCheck(desc, out var code, out _))
                 {
                     continue;
                 }
-                var code = Convert.ToUInt32(m.Groups[1].Value, 16);
                 var entry = BugCheckDatabase.Get(code);
                 list.Add(new DashboardCrashItem
                 {

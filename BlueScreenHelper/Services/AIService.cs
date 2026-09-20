@@ -1,4 +1,5 @@
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -8,9 +9,10 @@ namespace BlueScreenHelper.Services;
 
 public sealed class AIService
 {
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(120) };
+    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(120) };
 
     private static readonly Regex ToolCallRegex = new(@"\[\[TOOL:([A-Za-z0-9_]+)\]\]", RegexOptions.Compiled);
+    private static readonly string[] ModelIdProperties = ["id", "name", "model"];
 
     public async Task<string> ChatAsync(AIConfigItem config, IReadOnlyList<ChatMessage> history,
         string? systemPromptOverride, Action<string>? onDelta, CancellationToken ct)
@@ -19,17 +21,14 @@ public sealed class AIService
         {
             throw new InvalidOperationException("尚未选择 AI 配置，请先在“设置”页面保存一个 AI 服务。");
         }
-        if (string.IsNullOrWhiteSpace(config.ApiKey) && config.Provider != AIProvider.Custom)
+        if (string.IsNullOrWhiteSpace(config.ApiKey))
         {
             throw new InvalidOperationException("该 AI 配置尚未填写 API Key，请先在“设置”页面填写。");
         }
 
-        return config.Provider switch
-        {
-            AIProvider.Anthropic => await ChatAnthropicAsync(config, history, systemPromptOverride, onDelta, ct),
-            AIProvider.Gemini => await ChatGeminiAsync(config, history, systemPromptOverride, onDelta, ct),
-            _ => await ChatOpenAIAsync(config, history, systemPromptOverride, onDelta, ct)
-        };
+        return config.Provider == AIProvider.Anthropic
+            ? await ChatAnthropicAsync(config, history, systemPromptOverride, onDelta, ct)
+            : await ChatOpenAIAsync(config, history, systemPromptOverride, onDelta, ct);
     }
 
     /// <summary>
@@ -38,16 +37,21 @@ public sealed class AIService
     public async Task<string> ChatWithToolsAsync(AIConfigItem config, IReadOnlyList<ChatMessage> history,
         string? systemPromptOverride, Action<string>? onDelta, Action<AiToolDef>? onToolStart, CancellationToken ct)
     {
-        var work = history
-            .Select(h => new ChatMessage { Role = h.Role, Content = h.Content })
-            .Where(h => !string.IsNullOrWhiteSpace(h.Content))
-            .ToList();
+        var work = new List<ChatMessage>(history.Count + 10);
+        foreach (var message in history)
+        {
+            if (!string.IsNullOrWhiteSpace(message.Content))
+            {
+                work.Add(message);
+            }
+        }
+
+        var mergedSystem = (string.IsNullOrWhiteSpace(systemPromptOverride)
+            ? config.SystemPrompt
+            : systemPromptOverride) + AiSystemTools.Instructions;
 
         for (var round = 0; round < 5; round++)
         {
-            var mergedSystem = (string.IsNullOrWhiteSpace(systemPromptOverride) ? config.SystemPrompt : systemPromptOverride)
-                               + AiSystemTools.Instructions;
-
             var reply = await ChatAsync(config, work, mergedSystem, onDelta, ct);
 
             var m = ToolCallRegex.Match(reply);
@@ -117,84 +121,90 @@ public sealed class AIService
     }
 
     /// <summary>
-    /// 查询接口支持哪些模型（OpenAI 兼容 /data[].id、Anthropic /data[].id、Gemini /models[].name）。
+    /// 通过 DeepSeek OpenAI 兼容接口查询模型列表。
     /// </summary>
-    public async Task<List<string>> ListModelsAsync(AIConfigItem config)
+    public async Task<List<string>> ListModelsAsync(AIConfigItem config, CancellationToken ct = default)
     {
-        var b = (config.ApiBaseUrl ?? "").Trim().TrimEnd('/');
-        if (b.Length == 0)
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{DeepSeekEndpoints.OpenAI}/models");
+        if (!string.IsNullOrWhiteSpace(config.ApiKey))
         {
-            throw new InvalidOperationException("接口地址不能为空。");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", config.ApiKey);
         }
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(b + "/models"));
-        switch (config.Provider)
-        {
-            case AIProvider.Anthropic:
-                request.Headers.Add("x-api-key", config.ApiKey);
-                request.Headers.Add("anthropic-version", "2023-06-01");
-                break;
-            case AIProvider.Gemini:
-                if (!string.IsNullOrWhiteSpace(config.ApiKey))
-                {
-                    request.Headers.Add("x-goog-api-key", config.ApiKey);
-                }
-                break;
-            default:
-                if (!string.IsNullOrWhiteSpace(config.ApiKey))
-                {
-                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", config.ApiKey);
-                }
-                break;
-        }
-
-        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+        using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct)
+            .ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
-            var err = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            var err = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             throw new InvalidOperationException($"查询模型列表失败 ({(int)response.StatusCode})：{Truncate(err, 300)}");
         }
 
-        var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-        using var doc = JsonDocument.Parse(json);
+        await using var json = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        using var doc = await JsonDocument.ParseAsync(json, cancellationToken: ct).ConfigureAwait(false);
         var root = doc.RootElement;
         var models = new List<string>();
 
         if (root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array)
         {
-            foreach (var item in data.EnumerateArray())
-            {
-                if (item.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String)
-                {
-                    models.Add(id.GetString()!);
-                }
-            }
+            AddModels(data, models);
         }
         else if (root.TryGetProperty("models", out var arr) && arr.ValueKind == JsonValueKind.Array)
         {
-            foreach (var item in arr.EnumerateArray())
-            {
-                if (item.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String)
-                {
-                    var n = name.GetString()!;
-                    models.Add(n.StartsWith("models/", StringComparison.Ordinal) ? n["models/".Length..] : n);
-                }
-                else if (item.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String)
-                {
-                    models.Add(id.GetString()!);
-                }
-            }
+            AddModels(arr, models);
+        }
+        else if (root.ValueKind == JsonValueKind.Array)
+        {
+            AddModels(root, models);
         }
 
         if (models.Count == 0)
         {
             throw new InvalidOperationException("该接口未返回任何模型，可能不支持模型列表查询，请手动输入模型名称。");
         }
-        models.Sort(StringComparer.OrdinalIgnoreCase);
-        return models;
+        return models.Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
-    // ---------- OpenAI 兼容协议（OpenAI / Custom / Ollama / DeepSeek 等） ----------
+    private static void AddModels(JsonElement items, List<string> models)
+    {
+        foreach (var item in items.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.String)
+            {
+                AddModel(item.GetString(), models);
+                continue;
+            }
+
+            if (item.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            foreach (var propertyName in ModelIdProperties)
+            {
+                if (item.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String)
+                {
+                    AddModel(value.GetString(), models);
+                    break;
+                }
+            }
+        }
+    }
+
+    private static void AddModel(string? model, List<string> models)
+    {
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            return;
+        }
+
+        models.Add(model.StartsWith("models/", StringComparison.OrdinalIgnoreCase)
+            ? model["models/".Length..]
+            : model);
+    }
+
+    // ---------- DeepSeek OpenAI 兼容协议 ----------
 
     private async Task<string> ChatOpenAIAsync(AIConfigItem config, IReadOnlyList<ChatMessage> history,
         string? systemPromptOverride, Action<string>? onDelta, CancellationToken ct)
@@ -215,57 +225,19 @@ public sealed class AIService
 
         var body = new
         {
-            model = string.IsNullOrWhiteSpace(config.Model) ? "gpt-4o-mini" : config.Model,
+            model = string.IsNullOrWhiteSpace(config.Model) ? "deepseek-flash" : config.Model,
             messages,
             stream = true,
             temperature = config.Temperature
         };
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, BuildOpenAIUri(config.ApiBaseUrl));
+        using var request = new HttpRequestMessage(HttpMethod.Post, BuildOpenAIUri());
         if (!string.IsNullOrWhiteSpace(config.ApiKey))
         {
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", config.ApiKey);
         }
-        request.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
-
-        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
-        {
-            var err = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            throw new InvalidOperationException($"API 请求失败 ({(int)response.StatusCode})：{Truncate(err, 400)}");
-        }
-
-        using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-        using var reader = new StreamReader(stream, Encoding.UTF8);
-
-        var sb = new StringBuilder();
-        string? line;
-        while ((line = await reader.ReadLineAsync(ct).ConfigureAwait(false)) != null)
-        {
-            if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-            var data = line[5..].Trim();
-            if (data == "[DONE]")
-            {
-                break;
-            }
-            try
-            {
-                using var doc = JsonDocument.Parse(data);
-                var delta = doc.RootElement.GetProperty("choices")[0].GetProperty("delta");
-                if (delta.TryGetProperty("content", out var contentProp) && contentProp.ValueKind == JsonValueKind.String)
-                {
-                    AppendDelta(sb, contentProp.GetString(), onDelta);
-                }
-            }
-            catch
-            {
-            }
-        }
-
-        return FinishResult(sb);
+        request.Content = JsonContent.Create(body);
+        return await SendStreamingAsync(request, ExtractOpenAiDelta, onDelta, ct).ConfigureAwait(false);
     }
 
     // ---------- Anthropic 协议 ----------
@@ -285,7 +257,7 @@ public sealed class AIService
 
         var body = new
         {
-            model = string.IsNullOrWhiteSpace(config.Model) ? "claude-sonnet-4-5" : config.Model,
+            model = string.IsNullOrWhiteSpace(config.Model) ? "deepseek-flash" : config.Model,
             max_tokens = 4096,
             system = sys ?? "",
             messages,
@@ -293,140 +265,100 @@ public sealed class AIService
             temperature = config.Temperature
         };
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, BuildAnthropicUri(config.ApiBaseUrl));
+        using var request = new HttpRequestMessage(HttpMethod.Post, BuildAnthropicUri());
         request.Headers.Add("x-api-key", config.ApiKey);
         request.Headers.Add("anthropic-version", "2023-06-01");
-        request.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
-
-        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
-        {
-            var err = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            throw new InvalidOperationException($"API 请求失败 ({(int)response.StatusCode})：{Truncate(err, 400)}");
-        }
-
-        using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-        using var reader = new StreamReader(stream, Encoding.UTF8);
-
-        var sb = new StringBuilder();
-        string? line;
-        while ((line = await reader.ReadLineAsync(ct).ConfigureAwait(false)) != null)
-        {
-            if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-            var data = line[5..].Trim();
-            if (data == "[DONE]")
-            {
-                break;
-            }
-            try
-            {
-                using var doc = JsonDocument.Parse(data);
-                if (doc.RootElement.TryGetProperty("type", out var typeProp))
-                {
-                    if (typeProp.GetString() == "content_block_delta" &&
-                        doc.RootElement.TryGetProperty("delta", out var delta) &&
-                        delta.TryGetProperty("type", out var deltaType) &&
-                        deltaType.GetString() == "text_delta" &&
-                        delta.TryGetProperty("text", out var textProp))
-                    {
-                        AppendDelta(sb, textProp.GetString(), onDelta);
-                    }
-                }
-            }
-            catch
-            {
-            }
-        }
-
-        return FinishResult(sb);
-    }
-
-    // ---------- Gemini 协议 ----------
-
-    private async Task<string> ChatGeminiAsync(AIConfigItem config, IReadOnlyList<ChatMessage> history,
-        string? systemPromptOverride, Action<string>? onDelta, CancellationToken ct)
-    {
-        var sys = string.IsNullOrWhiteSpace(systemPromptOverride) ? config.SystemPrompt : systemPromptOverride;
-        var contents = new List<object>();
-        foreach (var m in history)
-        {
-            if (!string.IsNullOrWhiteSpace(m.Content))
-            {
-                contents.Add(new { role = m.Role == "assistant" ? "model" : "user", parts = new[] { new { text = m.Content } } });
-            }
-        }
-
-        var body = new
-        {
-            contents,
-            systemInstruction = string.IsNullOrWhiteSpace(sys) ? null : new { parts = new[] { new { text = sys } } },
-            generationConfig = new { temperature = config.Temperature }
-        };
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, BuildGeminiUri(config));
-        if (!string.IsNullOrWhiteSpace(config.ApiKey))
-        {
-            request.Headers.Add("x-goog-api-key", config.ApiKey);
-        }
-        request.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
-
-        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
-        {
-            var err = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            throw new InvalidOperationException($"API 请求失败 ({(int)response.StatusCode})：{Truncate(err, 400)}");
-        }
-
-        using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-        using var reader = new StreamReader(stream, Encoding.UTF8);
-
-        var sb = new StringBuilder();
-        string? line;
-        while ((line = await reader.ReadLineAsync(ct).ConfigureAwait(false)) != null)
-        {
-            if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-            var data = line[5..].Trim();
-            try
-            {
-                using var doc = JsonDocument.Parse(data);
-                var arr = doc.RootElement;
-                if (arr.ValueKind == JsonValueKind.Array && arr.GetArrayLength() > 0)
-                {
-                    var first = arr[0];
-                    if (first.TryGetProperty("candidates", out var candidates) &&
-                        candidates.GetArrayLength() > 0 &&
-                        candidates[0].TryGetProperty("content", out var content) &&
-                        content.TryGetProperty("parts", out var parts) &&
-                        parts.GetArrayLength() > 0 &&
-                        parts[0].TryGetProperty("text", out var textProp))
-                    {
-                        AppendDelta(sb, textProp.GetString(), onDelta);
-                    }
-                }
-            }
-            catch
-            {
-            }
-        }
-
-        return FinishResult(sb);
+        request.Content = JsonContent.Create(body);
+        return await SendStreamingAsync(request, ExtractAnthropicDelta, onDelta, ct).ConfigureAwait(false);
     }
 
     // ---------- 辅助 ----------
 
-    private static void AppendDelta(StringBuilder sb, string? text, Action<string>? onDelta)
+    private static async Task<string> SendStreamingAsync(HttpRequestMessage request,
+        Func<JsonElement, string?> extractDelta, Action<string>? onDelta, CancellationToken ct)
     {
-        if (!string.IsNullOrEmpty(text))
+        using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct)
+            .ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
         {
-            sb.Append(text);
-            onDelta?.Invoke(text);
+            var error = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            throw new InvalidOperationException(
+                $"API 请求失败 ({(int)response.StatusCode})：{Truncate(error, 400)}");
         }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        var result = new StringBuilder();
+        var pendingDeltas = onDelta == null ? null : new StringBuilder();
+        var nextDeltaFlush = Environment.TickCount64 + 50;
+
+        while (await reader.ReadLineAsync(ct).ConfigureAwait(false) is { } line)
+        {
+            if (string.IsNullOrWhiteSpace(line) ||
+                !line.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var data = line.AsSpan(5).Trim();
+            if (data.SequenceEqual("[DONE]"))
+            {
+                break;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(data.ToString());
+                var delta = extractDelta(document.RootElement);
+                if (string.IsNullOrEmpty(delta))
+                {
+                    continue;
+                }
+
+                result.Append(delta);
+                if (pendingDeltas != null)
+                {
+                    pendingDeltas.Append(delta);
+                    if (Environment.TickCount64 >= nextDeltaFlush)
+                    {
+                        onDelta!(pendingDeltas.ToString());
+                        pendingDeltas.Clear();
+                        nextDeltaFlush = Environment.TickCount64 + 50;
+                    }
+                }
+            }
+            catch (JsonException)
+            {
+            }
+            catch (InvalidOperationException)
+            {
+            }
+        }
+
+        if (pendingDeltas?.Length > 0)
+        {
+            onDelta!(pendingDeltas.ToString());
+        }
+
+        return FinishResult(result);
+    }
+
+    private static string? ExtractOpenAiDelta(JsonElement root)
+    {
+        var delta = root.GetProperty("choices")[0].GetProperty("delta");
+        return delta.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.String
+            ? content.GetString()
+            : null;
+    }
+
+    private static string? ExtractAnthropicDelta(JsonElement root)
+    {
+        return root.TryGetProperty("type", out var type) && type.GetString() == "content_block_delta" &&
+               root.TryGetProperty("delta", out var delta) &&
+               delta.TryGetProperty("type", out var deltaType) && deltaType.GetString() == "text_delta" &&
+               delta.TryGetProperty("text", out var text)
+            ? text.GetString()
+            : null;
     }
 
     private static string FinishResult(StringBuilder sb)
@@ -439,43 +371,14 @@ public sealed class AIService
         return result;
     }
 
-    private static Uri BuildOpenAIUri(string baseUrl)
+    private static Uri BuildOpenAIUri()
     {
-        var b = (baseUrl ?? "").Trim().TrimEnd('/');
-        if (b.Length == 0)
-        {
-            b = "https://api.openai.com/v1";
-        }
-        if (b.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
-        {
-            return new Uri(b);
-        }
-        return new Uri(b + "/chat/completions");
+        return new Uri($"{DeepSeekEndpoints.OpenAI}/chat/completions");
     }
 
-    private static Uri BuildAnthropicUri(string baseUrl)
+    private static Uri BuildAnthropicUri()
     {
-        var b = (baseUrl ?? "").Trim().TrimEnd('/');
-        if (b.Length == 0)
-        {
-            b = "https://api.anthropic.com/v1";
-        }
-        if (b.EndsWith("/messages", StringComparison.OrdinalIgnoreCase))
-        {
-            return new Uri(b);
-        }
-        return new Uri(b + "/messages");
-    }
-
-    private static Uri BuildGeminiUri(AIConfigItem config)
-    {
-        var b = (config.ApiBaseUrl ?? "").Trim().TrimEnd('/');
-        if (b.Length == 0)
-        {
-            b = "https://generativelanguage.googleapis.com/v1beta";
-        }
-        var model = string.IsNullOrWhiteSpace(config.Model) ? "gemini-2.0-flash" : config.Model;
-        return new Uri($"{b}/models/{model}:streamGenerateContent?alt=sse");
+        return new Uri($"{DeepSeekEndpoints.Anthropic}/v1/messages");
     }
 
     private static string Truncate(string s, int max)

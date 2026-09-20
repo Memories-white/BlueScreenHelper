@@ -10,15 +10,25 @@ public sealed partial class SettingsPage : Page
 {
     private static readonly string[] ModelPresets =
     {
-        "gpt-4o-mini", "gpt-4o", "deepseek-chat", "deepseek-reasoner",
-        "glm-4-flash", "glm-4-plus", "moonshot-v1-8k", "qwen-plus", "qwen-turbo",
-        "Qwen/Qwen2.5-7B-Instruct", "Meta-Llama-3.1-70B-Instruct", "llama3.1",
-        "claude-sonnet-4-5", "claude-opus-4-1", "claude-haiku-4-5",
-        "gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-pro"
+        "deepseek-flash", "deepseek-v4-pro"
     };
 
+    private static readonly string[] PreferredModels =
+    {
+        "deepseek-flash", "deepseek-v4-pro"
+    };
+
+    private static readonly string[] ExcludedModelTerms =
+    {
+        "embed", "rerank", "whisper", "tts", "moderation", "image", "dall-e"
+    };
+
+    private readonly AIService _ai = new();
     private AIConfigItem? _current;
+    private CancellationTokenSource? _modelFetchCts;
     private bool _syncingPreset;
+    private bool _loadingFields;
+    private bool _fetchingModels;
 
     public SettingsPage()
     {
@@ -68,37 +78,48 @@ public sealed partial class SettingsPage : Page
 
     private void LoadConfigToFields(AIConfigItem? cfg)
     {
-        _current = cfg;
-        SyncPresetSelection(cfg);
-        var has = cfg != null;
-        BaseUrlBox.Text = has ? cfg!.ApiBaseUrl : "";
-        ApiKeyBox.Password = has ? cfg!.ApiKey : "";
-        var model = cfg?.Model ?? "";
-        var presets = ModelPresets.ToList();
-        if (!string.IsNullOrWhiteSpace(model) && !presets.Contains(model))
+        _loadingFields = true;
+        try
         {
-            presets.Insert(0, model);
+            CancelModelFetch();
+            _current = cfg;
+            SyncPresetSelection(cfg);
+            var has = cfg != null;
+            BaseUrlBox.Text = has ? DeepSeekEndpoints.ForProvider(cfg!.Provider) : "";
+            ApiKeyBox.Password = has ? cfg!.ApiKey : "";
+            var model = cfg?.Model ?? "";
+            var presets = ModelPresets.ToList();
+            if (!string.IsNullOrWhiteSpace(model) && !presets.Contains(model))
+            {
+                presets.Insert(0, model);
+            }
+            ModelBox.ItemsSource = presets;
+            if (presets.Contains(model))
+            {
+                ModelBox.SelectedItem = model;
+            }
+            else
+            {
+                ModelBox.Text = model;
+            }
+            TempSlider.Value = has ? cfg!.Temperature : 0.3;
+            PromptBox.Text = has ? cfg!.SystemPrompt : "";
+            TempValueText.Text = DescribeTemperature(TempSlider.Value);
+            SaveButton.IsEnabled = has;
+            TestButton.IsEnabled = has;
         }
-        ModelBox.ItemsSource = presets;
-        if (presets.Contains(model))
+        finally
         {
-            ModelBox.SelectedItem = model;
+            _loadingFields = false;
+            UpdateFetchModelsState(resetStatus: true);
+            ScheduleAutomaticModelFetch();
         }
-        else
-        {
-            ModelBox.Text = model;
-        }
-        TempSlider.Value = has ? cfg!.Temperature : 0.3;
-        PromptBox.Text = has ? cfg!.SystemPrompt : "";
-        TempValueText.Text = DescribeTemperature(TempSlider.Value);
-        SaveButton.IsEnabled = has;
-        TestButton.IsEnabled = has;
-        UpdateFetchModelsState();
     }
 
     private void WriteFieldsToConfig(AIConfigItem cfg)
     {
-        cfg.ApiBaseUrl = BaseUrlBox.Text.Trim();
+        cfg.Provider = DeepSeekEndpoints.NormalizeProvider(cfg.Provider);
+        cfg.ApiBaseUrl = DeepSeekEndpoints.ForProvider(cfg.Provider);
         cfg.ApiKey = ApiKeyBox.Password.Trim();
         cfg.Model = ModelBox.Text.Trim();
         cfg.Temperature = TempSlider.Value;
@@ -148,75 +169,178 @@ public sealed partial class SettingsPage : Page
             };
             AppState.Settings.AIConfigs.Add(cfg);
         }
+        else
+        {
+            cfg.ApiBaseUrl = DeepSeekEndpoints.ForProvider(cfg.Provider);
+        }
         AppState.Settings.ActiveConfigName = cfg.Name;
         RefreshConfigs();
     }
 
-    private void UpdateFetchModelsState()
+    private void UpdateFetchModelsState(bool resetStatus = false)
     {
-        var isAnthropic = _current?.Provider == AIProvider.Anthropic;
-        FetchModelsButton.IsEnabled = !isAnthropic;
-        FetchModelsTipText.Visibility = isAnthropic ? Visibility.Visible : Visibility.Collapsed;
+        FetchModelsButton.IsEnabled = CanFetchModelsAutomatically() && !_fetchingModels;
+        if (!_fetchingModels && resetStatus)
+        {
+            AutoModelStatusText.Text = "填写 DeepSeek API Key 后，将自动查询并选择可用模型。";
+        }
     }
 
     private async void FetchModels_Click(object sender, RoutedEventArgs e)
     {
-        if (_current?.Provider == AIProvider.Anthropic)
+        if (_current == null)
         {
-            ShowBar(InfoBarSeverity.Informational, "Anthropic 协议不支持查询模型列表", "请手动输入模型名称（如 claude-sonnet-4-5）。");
+            ShowBar(InfoBarSeverity.Warning, "尚未选择 AI 服务", "请先选择一个 AI 服务预设。");
             return;
         }
 
-        var url = BaseUrlBox.Text.Trim();
-        if (string.IsNullOrWhiteSpace(url))
+        if (string.IsNullOrWhiteSpace(ApiKeyBox.Password))
         {
-            ShowBar(InfoBarSeverity.Warning, "接口地址不能为空", "请先填写接口地址 (Base URL)。");
+            ShowBar(InfoBarSeverity.Warning, "尚未填写 API Key", "请先填写 DeepSeek API Key。");
             return;
         }
 
-        var cfg = new AIConfigItem
-        {
-            Provider = _current?.Provider ?? AIProvider.Custom,
-            ApiBaseUrl = url,
-            ApiKey = ApiKeyBox.Password.Trim()
-        };
+        await StartModelFetchAsync(automatic: false);
+    }
 
-        FetchModelsButton.IsEnabled = false;
-        ModelFetchRing.IsActive = true;
-        SaveBar.IsOpen = false;
+    private void ApiKeyBox_PasswordChanged(object sender, RoutedEventArgs e)
+    {
+        ScheduleAutomaticModelFetch();
+    }
+
+    private void ScheduleAutomaticModelFetch()
+    {
+        if (_loadingFields)
+        {
+            return;
+        }
+
+        CancelModelFetch();
+        if (!CanFetchModelsAutomatically())
+        {
+            UpdateFetchModelsState();
+            return;
+        }
+
+        AutoModelStatusText.Text = "等待输入完成后自动查询模型…";
+        _ = StartModelFetchAsync(automatic: true);
+    }
+
+    private bool CanFetchModelsAutomatically()
+    {
+        return _current != null && !string.IsNullOrWhiteSpace(ApiKeyBox.Password);
+    }
+
+    private async Task StartModelFetchAsync(bool automatic)
+    {
+        CancelModelFetch();
+        var cts = new CancellationTokenSource();
+        _modelFetchCts = cts;
+
         try
         {
-            var models = await new AIService().ListModelsAsync(cfg);
-            ModelBox.ItemsSource = models;
-            var currentModel = ModelBox.Text.Trim();
-            ModelBox.SelectedItem = null;
-            if (!string.IsNullOrWhiteSpace(currentModel) && models.Contains(currentModel, StringComparer.OrdinalIgnoreCase))
+            if (automatic)
             {
-                ModelBox.SelectedItem = models.First(m => m.Equals(currentModel, StringComparison.OrdinalIgnoreCase));
+                await Task.Delay(700, cts.Token);
             }
-            ShowBar(InfoBarSeverity.Success, $"查询到 {models.Count} 个可用模型", "请在下拉列表中选择模型名称（也可继续手动输入）。");
+
+            _fetchingModels = true;
+            FetchModelsButton.IsEnabled = false;
+            ModelFetchRing.IsActive = true;
+            AutoModelStatusText.Text = automatic ? "正在自动查询可用模型…" : "正在查询可用模型…";
+            SaveBar.IsOpen = false;
+
+            var config = new AIConfigItem
+            {
+                Provider = _current?.Provider ?? AIProvider.OpenAI,
+                ApiBaseUrl = DeepSeekEndpoints.ForProvider(_current?.Provider ?? AIProvider.OpenAI),
+                ApiKey = ApiKeyBox.Password.Trim()
+            };
+
+            var models = await _ai.ListModelsAsync(config, cts.Token);
+            cts.Token.ThrowIfCancellationRequested();
+            var selectedModel = ApplyAvailableModels(models);
+            AutoModelStatusText.Text = $"已查询到 {models.Count} 个模型，已选择 {selectedModel}。";
+
+            if (automatic)
+            {
+                ShowBar(InfoBarSeverity.Success, "已自动查询模型",
+                    $"已选择 {selectedModel}；确认后请点击“保存配置”。");
+            }
+            else
+            {
+                ShowBar(InfoBarSeverity.Success, $"查询到 {models.Count} 个可用模型",
+                    $"已选择 {selectedModel}，也可以从下拉列表中更换。");
+            }
+        }
+        catch (OperationCanceledException)
+        {
         }
         catch (Exception ex)
         {
-            ShowBar(InfoBarSeverity.Error, "查询模型失败", ex.Message);
+            AutoModelStatusText.Text = $"{(automatic ? "自动查询" : "查询")}失败：{ex.Message}";
+            if (!automatic)
+            {
+                ShowBar(InfoBarSeverity.Error, "查询模型失败", ex.Message);
+            }
         }
         finally
         {
-            FetchModelsButton.IsEnabled = true;
-            ModelFetchRing.IsActive = false;
-            SaveBar.IsOpen = true;
+            if (ReferenceEquals(_modelFetchCts, cts))
+            {
+                _modelFetchCts = null;
+                _fetchingModels = false;
+                ModelFetchRing.IsActive = false;
+                UpdateFetchModelsState();
+            }
+            cts.Dispose();
         }
+    }
+
+    private string ApplyAvailableModels(IReadOnlyList<string> models)
+    {
+        var currentModel = ModelBox.Text.Trim();
+        var selectedModel = models.FirstOrDefault(model =>
+                                model.Equals(currentModel, StringComparison.OrdinalIgnoreCase))
+                            ?? PreferredModels.Select(preferred => models.FirstOrDefault(model =>
+                                    model.Equals(preferred, StringComparison.OrdinalIgnoreCase)))
+                                .FirstOrDefault(model => model != null)
+                            ?? models.FirstOrDefault(IsLikelyChatModel)
+                            ?? models[0];
+
+        ModelBox.ItemsSource = models;
+        ModelBox.SelectedItem = selectedModel;
+        return selectedModel;
+    }
+
+    private static bool IsLikelyChatModel(string model)
+    {
+        return !ExcludedModelTerms.Any(term => model.Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void CancelModelFetch()
+    {
+        var cts = _modelFetchCts;
+        _modelFetchCts = null;
+        if (cts == null)
+        {
+            return;
+        }
+
+        cts.Cancel();
+        _fetchingModels = false;
+        ModelFetchRing.IsActive = false;
+    }
+
+    private void Page_Unloaded(object sender, RoutedEventArgs e)
+    {
+        CancelModelFetch();
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)
     {
         if (_current == null)
         {
-            return;
-        }
-        if (string.IsNullOrWhiteSpace(BaseUrlBox.Text))
-        {
-            ShowBar(InfoBarSeverity.Warning, "接口地址不能为空", "请填写接口地址 (Base URL)。");
             return;
         }
         WriteFieldsToConfig(_current);
@@ -233,15 +357,9 @@ public sealed partial class SettingsPage : Page
         {
             return;
         }
-        if (string.IsNullOrWhiteSpace(BaseUrlBox.Text))
+        if (string.IsNullOrWhiteSpace(ApiKeyBox.Password))
         {
-            ShowBar(InfoBarSeverity.Warning, "接口地址不能为空", "请先填写接口地址 (Base URL)。");
-            return;
-        }
-        if (string.IsNullOrWhiteSpace(ApiKeyBox.Password) && _current.Provider != AIProvider.Custom)
-        {
-            ShowBar(InfoBarSeverity.Warning, "尚未填写 API Key",
-                "该协议需要 API Key。自定义（OpenAI 兼容）的本地服务如 Ollama 可留空。");
+            ShowBar(InfoBarSeverity.Warning, "尚未填写 API Key", "请先填写 DeepSeek API Key。");
             return;
         }
 

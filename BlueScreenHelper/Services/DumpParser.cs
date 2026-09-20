@@ -14,7 +14,7 @@ public static class DumpParser
     private const uint StreamTypeException = 0x0006;
     private const uint StreamTypeMiscInfo = 0x0007;
 
-    private static readonly string[] GpuDriverKeywords =
+    private static readonly HashSet<string> GpuDriverKeywords = new(StringComparer.OrdinalIgnoreCase)
     {
         "nvlddmkm.sys", "nvddmkm.sys", "nvlddm.sys", "nvkflt.sys",
         "atikmpag.sys", "atikmdag.sys", "amdkmdag.sys", "amdkmdap.sys", "amdwddmg.sys",
@@ -23,6 +23,11 @@ public static class DumpParser
         "basicdisplay.sys", "basicrender.sys", "display.sys",
         "nvwgf2umx.dll", "igdumd64.dll"
     };
+
+    private static readonly HashSet<uint> TdrBugChecks =
+    [
+        0x116, 0x117, 0x119, 0x10E, 0x113, 0x142
+    ];
 
     private static readonly Dictionary<uint, string[]> BugCheckParamMeanings = new()
     {
@@ -202,6 +207,8 @@ public static class DumpParser
                 {
                     count = 20000;
                 }
+                modules.Capacity = (int)count;
+                var nameBuffer = new byte[4096];
                 for (ulong i = 0; i < count; i++)
                 {
                     var baseAddr = reader.ReadUInt64();
@@ -219,8 +226,8 @@ public static class DumpParser
                         var len = reader.ReadUInt32();
                         if (len > 0 && len <= 4096 && nameRva + 4 + len <= fs.Length)
                         {
-                            var bytes = reader.ReadBytes((int)len);
-                            name = Encoding.Unicode.GetString(bytes).TrimEnd('\0');
+                            fs.ReadExactly(nameBuffer.AsSpan(0, (int)len));
+                            name = Encoding.Unicode.GetString(nameBuffer, 0, (int)len).TrimEnd('\0');
                         }
                         fs.Position = pos;
                     }
@@ -432,16 +439,13 @@ public static class DumpParser
 
         if (result.FaultingModule == null && result.IsKernelDump)
         {
-            var tdrFamily = new HashSet<uint> { 0x116, 0x117, 0x119, 0x10E, 0x113, 0x142 };
-            if (tdrFamily.Contains(result.BugCheckCode))
+            if (TdrBugChecks.Contains(result.BugCheckCode))
             {
-                foreach (var keyword in GpuDriverKeywords)
+                foreach (var module in result.Modules)
                 {
-                    var gpu = result.Modules.FirstOrDefault(m =>
-                        m.Name.Equals(keyword, StringComparison.OrdinalIgnoreCase));
-                    if (gpu != null)
+                    if (GpuDriverKeywords.Contains(module.Name))
                     {
-                        result.FaultingModule = gpu.Name;
+                        result.FaultingModule = module.Name;
                         break;
                     }
                 }
