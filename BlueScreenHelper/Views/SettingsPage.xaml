@@ -39,6 +39,7 @@
 
                     <TextBlock Style="{StaticResource FieldLabel}" Text="DeepSeek API Key" />
                     <PasswordBox x:Name="ApiKeyBox" PlaceholderText="sk-..."
+                                 PasswordRevealMode="Peek"
                                  PasswordChanged="ApiKeyBox_PasswordChanged" />
 
                     <TextBlock Style="{StaticResource FieldLabel}" Text="模型名称（填写接口地址和密钥后自动查询，也可手动查询或输入）" />
@@ -76,6 +77,12 @@
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <SymbolIcon Symbol="Play" />
                                 <TextBlock Text="测试连接" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="DeleteConfigButton" Click="DeleteConfig_Click" IsEnabled="False">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <SymbolIcon Symbol="Delete" />
+                                <TextBlock Text="删除配置" VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
                         <ProgressRing x:Name="TestRing" IsActive="False" Width="22" Height="22" VerticalAlignment="Center" />

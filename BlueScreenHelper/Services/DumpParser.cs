@@ -8,11 +8,22 @@ public static class DumpParser
     private const uint MinidumpSignature = 0x504D444D;
     private const uint PageDumpSignature = 0x45474150;
 
-    private const uint StreamTypeSystemInfo = 0x0003;
+    // MINIDUMP_STREAM_TYPE values are fixed by DbgHelp and do not depend on the
+    // architecture of the process that produced the dump.
+    private const uint StreamTypeSystemInfo = 0x0007;
     private const uint StreamTypeModuleList = 0x0004;
     private const uint StreamTypeBugCheck = 0x0505;
     private const uint StreamTypeException = 0x0006;
-    private const uint StreamTypeMiscInfo = 0x0007;
+    private const uint StreamTypeMiscInfo = 0x000F;
+
+    private const int MinidumpDirectorySize = 12;
+    private const uint MinidumpModuleSize = 108;
+    private const uint MiscInfoProcessIdFlag = 0x00000001;
+
+    private readonly record struct StreamLocation(uint Rva, uint Size)
+    {
+        public bool IsPresent => Rva != 0 || Size != 0;
+    }
 
     private static readonly HashSet<string> GpuDriverKeywords = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -81,20 +92,19 @@ public static class DumpParser
             {
                 result.Error = "该文件既不是标准 MDMP 小转储，也不是 Windows 内核转储（PAGE 格式）。\n" +
                                "可能是文件损坏、未完成的转储，或第三方工具导出的数据。可尝试：\n" +
-                               "1. 确认文件完整（内核/完整转储通常为数百 MB 至数 GB）\n" +
-                               "2. 使用 WinDbg 打开分析：`windbg -z 文件路径` 并执行 `!analyze -v`\n" +
-                               "3. 使用“AI 智能诊断”提交该文件信息进行辅助分析";
+                               "1. 重新复制文件并确认传输完整（内核/完整转储通常为数百 MB 至数 GB）\n" +
+                               "2. 使用“系统扫描”核对同一时间的蓝屏事件记录\n" +
+                               "3. 在系统中重新启用转储后，等待下次崩溃生成新的转储文件";
                 return result;
             }
 
             fs.Position = 4;
             _ = reader.ReadUInt32();
             var streamCount = reader.ReadUInt32();
-            var dirRva = reader.ReadInt32();
+            var dirRva = reader.ReadUInt32();
             _ = reader.ReadUInt32();
             var timeStamp = reader.ReadUInt32();
 
-            result.IsValidMinidump = true;
             if (timeStamp != 0)
             {
                 try
@@ -108,35 +118,43 @@ public static class DumpParser
 
             if (streamCount > 4096)
             {
-                streamCount = 4096;
+                result.Error = $"转储目录包含异常数量的流（{streamCount}），文件可能已损坏。";
+                return result;
             }
 
-            bool isX64 = true;
-            uint systemInfoRva = 0, moduleListRva = 0, bugCheckRva = 0, exceptionRva = 0, miscInfoRva = 0;
+            var directoryLength = (ulong)streamCount * MinidumpDirectorySize;
+            if (!IsRangeValid(fs.Length, dirRva, directoryLength))
+            {
+                result.Error = "转储目录位置超出文件范围，文件可能不完整或已损坏。";
+                return result;
+            }
+
+            bool is64Bit = true;
+            StreamLocation systemInfo = default;
+            StreamLocation moduleList = default;
+            StreamLocation bugCheck = default;
+            StreamLocation exception = default;
+            StreamLocation miscInfo = default;
 
             fs.Position = dirRva;
             for (uint i = 0; i < streamCount; i++)
             {
-                if (fs.Position + 24 > fs.Length)
-                {
-                    break;
-                }
                 var type = reader.ReadUInt32();
                 var size = reader.ReadUInt32();
                 var rva = reader.ReadUInt32();
+                var location = new StreamLocation(rva, size);
                 switch (type)
                 {
-                    case StreamTypeSystemInfo: systemInfoRva = rva; break;
-                    case StreamTypeModuleList: moduleListRva = rva; break;
-                    case StreamTypeBugCheck: bugCheckRva = rva; break;
-                    case StreamTypeException: exceptionRva = rva; break;
-                    case StreamTypeMiscInfo: miscInfoRva = rva; break;
+                    case StreamTypeSystemInfo when !systemInfo.IsPresent: systemInfo = location; break;
+                    case StreamTypeModuleList when !moduleList.IsPresent: moduleList = location; break;
+                    case StreamTypeBugCheck when !bugCheck.IsPresent: bugCheck = location; break;
+                    case StreamTypeException when !exception.IsPresent: exception = location; break;
+                    case StreamTypeMiscInfo when !miscInfo.IsPresent: miscInfo = location; break;
                 }
             }
 
-            if (systemInfoRva > 0)
+            if (TrySeekStream(fs, systemInfo, 20, "系统信息"))
             {
-                fs.Position = systemInfoRva;
                 var arch = reader.ReadUInt16();
                 _ = reader.ReadUInt16();
                 _ = reader.ReadUInt16();
@@ -145,7 +163,7 @@ public static class DumpParser
                 var major = reader.ReadUInt32();
                 var minor = reader.ReadUInt32();
                 var build = reader.ReadUInt32();
-                isX64 = arch == 9;
+                is64Bit = arch is 9 or 12;
                 result.ProcessorArch = arch switch
                 {
                     0 => "x86 (32位)",
@@ -157,59 +175,58 @@ public static class DumpParser
                 result.OSVersion = BuildOsVersion(major, minor, build);
             }
 
-            if (bugCheckRva > 0)
+            var bugCheckSize = (uint)(4 + (is64Bit ? 8 : 4) * 4);
+            if (TrySeekStream(fs, bugCheck, bugCheckSize, "BugCheck 信息"))
             {
-                fs.Position = bugCheckRva;
                 result.BugCheckCode = reader.ReadUInt32();
                 result.IsKernelDump = result.BugCheckCode != 0;
-                fs.Position = bugCheckRva + 4;
                 for (int i = 0; i < 4; i++)
                 {
-                    result.BugCheckParameters[i] = isX64 ? reader.ReadUInt64() : reader.ReadUInt32();
+                    result.BugCheckParameters[i] = is64Bit ? reader.ReadUInt64() : reader.ReadUInt32();
                 }
             }
 
-            if (exceptionRva > 0)
+            if (TrySeekStream(fs, exception, 32, "异常信息"))
             {
-                fs.Position = exceptionRva;
-                result.ProcessId = reader.ReadUInt32();
-                fs.Position = exceptionRva + 8;
+                result.ThreadId = reader.ReadUInt32();
+                fs.Position = exception.Rva + 8;
                 var exCode = reader.ReadUInt32();
                 result.ExceptionCode = exCode;
-                if (isX64)
-                {
-                    fs.Position = exceptionRva + 8 + 24;
-                    result.ExceptionAddress = reader.ReadUInt64();
-                }
-                else
-                {
-                    fs.Position = exceptionRva + 8 + 16;
-                    result.ExceptionAddress = reader.ReadUInt32();
-                }
+                // MINIDUMP_EXCEPTION uses fixed-width ULONG64 fields even for an
+                // x86 target. ExceptionAddress is +16 within ExceptionRecord,
+                // whose start is +8 within MINIDUMP_EXCEPTION_STREAM.
+                fs.Position = exception.Rva + 24;
+                result.ExceptionAddress = reader.ReadUInt64();
             }
 
-            if (miscInfoRva > 0)
+            if (TrySeekStream(fs, miscInfo, 8, "杂项信息"))
             {
-                fs.Position = miscInfoRva;
                 var sizeOfInfo = reader.ReadUInt32();
-                if (sizeOfInfo >= 8 && result.ProcessId == null)
+                var flags = reader.ReadUInt32();
+                if (sizeOfInfo > miscInfo.Size)
+                {
+                    throw new InvalidDataException("杂项信息流声明的结构大小超出流边界。");
+                }
+                if (sizeOfInfo >= 12 && miscInfo.Size >= 12 && (flags & MiscInfoProcessIdFlag) != 0)
                 {
                     result.ProcessId = reader.ReadUInt32();
                 }
             }
 
             var modules = new List<DumpModule>();
-            if (moduleListRva > 0)
+            if (TrySeekStream(fs, moduleList, 4, "模块列表"))
             {
-                fs.Position = moduleListRva;
-                var count = isX64 ? reader.ReadUInt64() : reader.ReadUInt32();
-                if (count > 20000)
+                // NumberOfModules is always ULONG32; MINIDUMP_MODULE is always
+                // 108 bytes, regardless of the target architecture.
+                var count = reader.ReadUInt32();
+                var availableEntries = (moduleList.Size - 4) / MinidumpModuleSize;
+                if (count > availableEntries)
                 {
-                    count = 20000;
+                    throw new InvalidDataException("模块列表数量超出流边界，文件可能已损坏。");
                 }
-                modules.Capacity = (int)count;
-                var nameBuffer = new byte[4096];
-                for (ulong i = 0; i < count; i++)
+                var parseCount = Math.Min(count, 20000u);
+                modules.Capacity = (int)parseCount;
+                for (uint i = 0; i < parseCount; i++)
                 {
                     var baseAddr = reader.ReadUInt64();
                     var size = reader.ReadUInt32();
@@ -219,15 +236,16 @@ public static class DumpParser
                     fs.Position += 52 + 8 + 8 + 8 + 8;
 
                     string name = "";
-                    if (nameRva > 0 && nameRva + 4 <= fs.Length)
+                    if (IsRangeValid(fs.Length, nameRva, 4))
                     {
                         var pos = fs.Position;
                         fs.Position = nameRva;
                         var len = reader.ReadUInt32();
-                        if (len > 0 && len <= 4096 && nameRva + 4 + len <= fs.Length)
+                        if (len > 0 && len <= 32768 && len % 2 == 0 &&
+                            IsRangeValid(fs.Length, (ulong)nameRva + 4, len))
                         {
-                            fs.ReadExactly(nameBuffer.AsSpan(0, (int)len));
-                            name = Encoding.Unicode.GetString(nameBuffer, 0, (int)len).TrimEnd('\0');
+                            var bytes = reader.ReadBytes((int)len);
+                            name = Encoding.Unicode.GetString(bytes).TrimEnd('\0');
                         }
                         fs.Position = pos;
                     }
@@ -240,7 +258,7 @@ public static class DumpParser
             }
             result.Modules = modules;
 
-            ResolveFaultingModule(result, isX64);
+            ResolveFaultingModule(result);
 
             if (result.IsKernelDump && result.BugCheckCode > 0)
             {
@@ -270,13 +288,44 @@ public static class DumpParser
             {
                 result.BugCheckName = result.Knowledge.Name;
             }
+
+            result.IsValidMinidump = true;
         }
         catch (Exception ex)
         {
+            result.IsValidMinidump = false;
             result.Error = $"解析失败：{ex.Message}";
         }
 
         return result;
+    }
+
+    private static bool TrySeekStream(Stream stream, StreamLocation location, uint minimumSize, string displayName)
+    {
+        if (!location.IsPresent)
+        {
+            return false;
+        }
+        if (location.Size < minimumSize)
+        {
+            throw new InvalidDataException($"{displayName}流长度不足（{location.Size} 字节）。");
+        }
+        if (!IsRangeValid(stream.Length, location.Rva, location.Size))
+        {
+            throw new InvalidDataException($"{displayName}流位置超出文件范围。");
+        }
+        stream.Position = location.Rva;
+        return true;
+    }
+
+    private static bool IsRangeValid(long fileLength, ulong offset, ulong length)
+    {
+        if (fileLength < 0)
+        {
+            return false;
+        }
+        var size = (ulong)fileLength;
+        return offset <= size && length <= size - offset;
     }
 
     private static void ParseKernelDump(BinaryReader reader, DumpAnalysisResult result)
@@ -284,14 +333,35 @@ public static class DumpParser
         var fs = reader.BaseStream;
         fs.Position = 0;
         var header = new byte[0x2000];
-        int read = fs.Read(header, 0, header.Length);
-        if (read < 0x100)
+        var read = 0;
+        while (read < header.Length)
+        {
+            var count = fs.Read(header, read, header.Length - read);
+            if (count == 0)
+            {
+                break;
+            }
+            read += count;
+        }
+        if (read < 8)
         {
             result.Error = "内核转储文件过小，可能不完整。";
             return;
         }
 
-        bool isX64 = Encoding.ASCII.GetString(header, 4, 4) == "DU64";
+        var secondarySignature = Encoding.ASCII.GetString(header, 4, 4);
+        if (secondarySignature is not ("DU64" or "DUMP"))
+        {
+            result.Error = "PAGE 转储的辅助签名无效，文件可能已损坏。";
+            return;
+        }
+        bool isX64 = secondarySignature == "DU64";
+        var requiredHeaderSize = isX64 ? 0x2000 : 0x1000;
+        if (read < requiredHeaderSize)
+        {
+            result.Error = $"内核转储头部不完整（需要 {requiredHeaderSize} 字节，实际 {read} 字节）。";
+            return;
+        }
 
         var code = BitConverter.ToUInt32(header, isX64 ? 0x38 : 0x28);
         int paramOffset = isX64 ? 0x40 : 0x2C;
@@ -359,7 +429,6 @@ public static class DumpParser
             result.KernelDumpTypeText = "内核转储 (32位)";
         }
 
-        result.IsValidMinidump = true;
         result.IsKernelDump = true;
         result.DumpTime ??= result.FileModified;
 
@@ -372,6 +441,7 @@ public static class DumpParser
         result.BugCheckCode = code;
         result.Knowledge = BugCheckDatabase.Get(code);
         result.BugCheckName = result.Knowledge?.Name ?? "未知错误代码（知识库未收录）";
+        result.IsValidMinidump = true;
     }
 
     public static string[]? GetBugCheckParamMeanings(uint code)
@@ -406,7 +476,7 @@ public static class DumpParser
         return sb.ToString().Trim();
     }
 
-    private static void ResolveFaultingModule(DumpAnalysisResult result, bool isX64)
+    private static void ResolveFaultingModule(DumpAnalysisResult result)
     {
         if (result.Modules.Count == 0)
         {
@@ -457,8 +527,8 @@ public static class DumpParser
     {
         foreach (var m in modules)
         {
-            if (m.BaseAddress > 0 && m.Size > 0 &&
-                address >= m.BaseAddress && address < m.BaseAddress + m.Size)
+            if (m.BaseAddress > 0 && m.Size > 0 && address >= m.BaseAddress &&
+                address - m.BaseAddress < m.Size && !string.IsNullOrWhiteSpace(m.Name))
             {
                 return m.Name;
             }
@@ -512,6 +582,10 @@ public static class DumpParser
             if (r.ProcessId is uint pid)
             {
                 sb.AppendLine($"- **进程 ID**：{pid}");
+            }
+            if (r.ThreadId is uint tid)
+            {
+                sb.AppendLine($"- **线程 ID**：{tid}");
             }
             sb.AppendLine();
         }
@@ -616,6 +690,10 @@ public static class DumpParser
         if (r.ProcessId is uint pid)
         {
             sb.AppendLine($"- 进程ID: {pid}");
+        }
+        if (r.ThreadId is uint tid)
+        {
+            sb.AppendLine($"- 线程ID: {tid}");
         }
         if (r.Knowledge != null)
         {

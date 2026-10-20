@@ -95,7 +95,7 @@ public static class AIPresets
 
 public sealed class AppSettings
 {
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private static readonly object SettingsIoSync = new();
 
     public bool WelcomeDismissed { get; set; }
     public List<AIConfigItem> AIConfigs { get; set; } = new();
@@ -114,23 +114,25 @@ public sealed class AppSettings
 
     public static AppSettings Load()
     {
-        try
+        lock (SettingsIoSync)
         {
-            var dir = SettingsDir;
-            Directory.CreateDirectory(dir);
-            var path = Path.Combine(dir, "settings.json");
-            if (File.Exists(path))
+            try
             {
-                using var stream = File.OpenRead(path);
-                var s = JsonSerializer.Deserialize<AppSettings>(stream) ?? new AppSettings();
-                s.MigrateLegacySettings();
-                s.RestrictToDeepSeekEndpoints();
-                s.UpgradePrompts();
-                return s;
+                Directory.CreateDirectory(SettingsDir);
+                if (File.Exists(ConfigFilePath))
+                {
+                    var s = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(ConfigFilePath))
+                            ?? new AppSettings();
+                    s.MigrateLegacySettings();
+                    s.RestrictToDeepSeekEndpoints();
+                    s.UpgradePrompts();
+                    return s;
+                }
             }
-        }
-        catch
-        {
+            catch (Exception ex)
+            {
+                AppLogger.LogError("读取设置文件失败", ex);
+            }
         }
         return new AppSettings();
     }
@@ -203,18 +205,21 @@ public sealed class AppSettings
         }
     }
 
-    public void Save()
+    public bool Save()
     {
-        try
+        lock (SettingsIoSync)
         {
-            var dir = SettingsDir;
-            Directory.CreateDirectory(dir);
-            var path = Path.Combine(dir, "settings.json");
-            using var stream = File.Create(path);
-            JsonSerializer.Serialize(stream, this, JsonOptions);
-        }
-        catch
-        {
+            try
+            {
+                Directory.CreateDirectory(SettingsDir);
+                AtomicJsonFile.Write(ConfigFilePath, this);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("保存设置文件失败", ex);
+                return false;
+            }
         }
     }
 
@@ -314,7 +319,7 @@ public sealed class ChatSession
 
 public static class ChatSessionStore
 {
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private static readonly object SessionIoSync = new();
 
     private sealed class SessionFile
     {
@@ -323,37 +328,73 @@ public static class ChatSessionStore
 
     public static List<ChatSession> Load()
     {
-        try
+        lock (SessionIoSync)
         {
-            var path = AppSettings.SessionsFilePath;
-            if (File.Exists(path))
+            try
             {
-                using var stream = File.OpenRead(path);
-                var file = JsonSerializer.Deserialize<SessionFile>(stream);
-                return file?.Sessions ?? new List<ChatSession>();
+                var path = AppSettings.SessionsFilePath;
+                if (File.Exists(path))
+                {
+                    var file = JsonSerializer.Deserialize<SessionFile>(File.ReadAllText(path));
+                    return file?.Sessions ?? new List<ChatSession>();
+                }
             }
-        }
-        catch
-        {
+            catch (Exception ex)
+            {
+                AppLogger.LogError("读取 AI 会话文件失败", ex);
+            }
         }
         return new List<ChatSession>();
     }
 
-    public static void Save(List<ChatSession> sessions)
+    public static bool Save(List<ChatSession> sessions)
     {
+        ArgumentNullException.ThrowIfNull(sessions);
+        lock (SessionIoSync)
+        {
+            try
+            {
+                var dir = Path.GetDirectoryName(AppSettings.SessionsFilePath);
+                if (!string.IsNullOrEmpty(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+                AtomicJsonFile.Write(AppSettings.SessionsFilePath, new SessionFile { Sessions = sessions });
+                return true;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("保存 AI 会话文件失败", ex);
+                return false;
+            }
+        }
+    }
+}
+
+internal static class AtomicJsonFile
+{
+    private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
+
+    public static void Write<T>(string path, T value)
+    {
+        var tempPath = $"{path}.{Environment.ProcessId}.{Guid.NewGuid():N}.tmp";
         try
         {
-            var dir = Path.GetDirectoryName(AppSettings.SessionsFilePath);
-            if (!string.IsNullOrEmpty(dir))
-            {
-                Directory.CreateDirectory(dir);
-            }
-            var file = new SessionFile { Sessions = sessions };
-            using var stream = File.Create(AppSettings.SessionsFilePath);
-            JsonSerializer.Serialize(stream, file, JsonOptions);
+            File.WriteAllText(tempPath, JsonSerializer.Serialize(value, Options));
+            File.Move(tempPath, path, overwrite: true);
         }
-        catch
+        finally
         {
+            try
+            {
+                if (File.Exists(tempPath))
+                {
+                    File.Delete(tempPath);
+                }
+            }
+            catch
+            {
+            }
         }
     }
 }

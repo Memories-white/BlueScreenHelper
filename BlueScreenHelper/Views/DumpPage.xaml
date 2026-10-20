@@ -2,7 +2,10 @@
     x:Class="BlueScreenHelper.Views.DumpPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:models="using:BlueScreenHelper.Models">
+    xmlns:models="using:BlueScreenHelper.Models"
+    AllowDrop="True"
+    DragOver="Page_DragOver"
+    Drop="Page_Drop">
 
     <Page.Resources>
         <Style x:Key="CardStyle" TargetType="Border">
@@ -39,9 +42,12 @@
                         <TextBlock Text="复制分析报告" VerticalAlignment="Center" />
                     </StackPanel>
                 </Button>
+                <ProgressRing x:Name="AnalyzeRing" Width="24" Height="24" IsActive="False"
+                              VerticalAlignment="Center" />
             </StackPanel>
 
-            <TextBlock x:Name="FilePathText" Text="尚未选择文件" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+            <TextBlock x:Name="FilePathText" Text="尚未选择文件（也可将 .dmp 文件拖到此页面）"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
 
             <InfoBar x:Name="StatusBar" IsOpen="False" />
 

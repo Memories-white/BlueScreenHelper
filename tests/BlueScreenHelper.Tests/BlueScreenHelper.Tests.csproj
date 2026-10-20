@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <Platforms>x86;x64;ARM64</Platforms>
+    <Platform Condition="'$(Platform)'=='AnyCPU' Or '$(Platform)'=='Any CPU'">x64</Platform>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.0.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!--
+    The parser has no UI dependency. Linking its production sources keeps these
+    tests fast and platform-neutral while still exercising the exact code that
+    ships in the WinUI application.
+  -->
+  <ItemGroup>
+    <Compile Include="..\..\BlueScreenHelper\Models\BugCheckInfo.cs" Link="Production\Models\BugCheckInfo.cs" />
+    <Compile Include="..\..\BlueScreenHelper\Models\DumpAnalysisResult.cs" Link="Production\Models\DumpAnalysisResult.cs" />
+    <Compile Include="..\..\BlueScreenHelper\Services\BugCheckDatabase.cs" Link="Production\Services\BugCheckDatabase.cs" />
+    <Compile Include="..\..\BlueScreenHelper\Services\DumpParser.cs" Link="Production\Services\DumpParser.cs" />
+  </ItemGroup>
+</Project>

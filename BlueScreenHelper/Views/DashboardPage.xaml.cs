@@ -14,6 +14,7 @@ namespace BlueScreenHelper.Views;
 public sealed partial class DashboardPage : Page
 {
     private readonly ObservableCollection<DashboardCrashItem> _crashes = new();
+    private bool _refreshing;
 
     public DashboardPage()
     {
@@ -50,42 +51,69 @@ public sealed partial class DashboardPage : Page
 
     private async Task RefreshAsync()
     {
+        if (_refreshing)
+        {
+            return;
+        }
+
+        _refreshing = true;
+        RefreshButton.IsEnabled = false;
+        RefreshRing.IsActive = true;
+        DashboardStatusBar.IsOpen = false;
         SysText.Text = "加载中...";
         CrashText.Text = "加载中...";
-        await Task.Run(() =>
+        try
         {
-            var snap = SystemScanner.GetSystemSnapshot();
-            var bugChecks = GetCrashStats();
-            var power41 = CountPower41();
-            var dumpCount = CountDumpFiles();
-
-            DispatcherQueue.TryEnqueue(() =>
+            var data = await Task.Run(() =>
             {
-                var osName = snap.OSName + (string.IsNullOrEmpty(snap.Edition) ? "" : $"（{snap.Edition}）");
-                SysText.Text =
-                    $"操作系统：{osName}\n" +
-                    $"系统版本：{snap.OSVersion}\n" +
-                    $"体系结构：{snap.Arch} · {snap.ProcessorCount} 逻辑处理器\n" +
-                    $"制造商：{snap.Manufacturer} {snap.MachineModel}\n" +
-                    $"内存：{snap.TotalMemory}（可用 {snap.FreeMemory}，负载 {snap.MemoryLoadPercent}）\n" +
-                    $"上次启动：{snap.LastBoot:yyyy-MM-dd HH:mm:ss}\n" +
-                    $"已运行：{snap.Uptime}";
-
-                CrashText.Text =
-                    $"近 30 天蓝屏次数：{bugChecks.Count}\n" +
-                    $"异常断电记录：{power41} 次\n" +
-                    $"转储文件数量：{dumpCount}\n" +
-                    (bugChecks.Count > 0 ? $"最近一次：{bugChecks[0].Name}\n" : "") +
-                    (bugChecks.Count > 0 ? $"错误代码：{bugChecks[0].Code}" : "系统近期稳定");
-
-                _crashes.Clear();
-                foreach (var b in bugChecks.Take(8))
-                {
-                    _crashes.Add(b);
-                }
-                CrashExpander.IsExpanded = bugChecks.Count > 0;
+                var snapshot = SystemScanner.GetSystemSnapshot();
+                var crashes = GetCrashStats();
+                return (Snapshot: snapshot, Crashes: crashes, Power41: CountPower41(), DumpCount: CountDumpFiles());
             });
-        });
+
+            var snap = data.Snapshot;
+            var bugChecks = data.Crashes;
+            var osName = snap.OSName + (string.IsNullOrEmpty(snap.Edition) ? "" : $"（{snap.Edition}）");
+            SysText.Text =
+                $"操作系统：{osName}\n" +
+                $"系统版本：{snap.OSVersion}\n" +
+                $"体系结构：{snap.Arch} · {snap.ProcessorCount} 逻辑处理器\n" +
+                $"制造商：{snap.Manufacturer} {snap.MachineModel}\n" +
+                $"内存：{snap.TotalMemory}（可用 {snap.FreeMemory}，负载 {snap.MemoryLoadPercent}）\n" +
+                $"上次启动：{snap.LastBoot:yyyy-MM-dd HH:mm:ss}\n" +
+                $"已运行：{snap.Uptime}";
+
+            CrashText.Text =
+                $"近 30 天蓝屏次数：{bugChecks.Count}\n" +
+                $"异常断电记录：{data.Power41} 次\n" +
+                $"转储文件数量：{data.DumpCount}\n" +
+                (bugChecks.Count > 0 ? $"最近一次：{bugChecks[0].Name}\n" : "") +
+                (bugChecks.Count > 0 ? $"错误代码：{bugChecks[0].Code}" : "系统近期稳定");
+
+            _crashes.Clear();
+            foreach (var crash in bugChecks.Take(8))
+            {
+                _crashes.Add(crash);
+            }
+            CrashExpander.IsExpanded = bugChecks.Count > 0;
+        }
+        catch (Exception ex)
+        {
+            SysText.Text = "系统信息加载失败";
+            CrashText.Text = "崩溃记录加载失败";
+            _crashes.Clear();
+            CrashExpander.IsExpanded = false;
+            DashboardStatusBar.Severity = InfoBarSeverity.Error;
+            DashboardStatusBar.Title = "无法刷新首页信息";
+            DashboardStatusBar.Message = ex.Message;
+            DashboardStatusBar.IsOpen = true;
+        }
+        finally
+        {
+            _refreshing = false;
+            RefreshButton.IsEnabled = true;
+            RefreshRing.IsActive = false;
+        }
     }
 
     private static List<DashboardCrashItem> GetCrashStats()
@@ -167,8 +195,13 @@ public sealed partial class DashboardPage : Page
                 "*[System[Provider[@Name='Microsoft-Windows-Kernel-Power'] and (EventID=41) and TimeCreated[timediff(@SystemTime) <= 2592000000]]]");
             using var reader = new EventLogReader(query);
             var count = 0;
-            while (reader.ReadEvent() != null)
+            while (true)
             {
+                using var record = reader.ReadEvent();
+                if (record == null)
+                {
+                    break;
+                }
                 count++;
             }
             return count;

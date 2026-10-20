@@ -174,10 +174,11 @@ public static class AiSystemTools
     {
         var events = SystemScanner.QueryEvents("System",
             "*[System[(EventID=1001) and TimeCreated[timediff(@SystemTime) <= 2592000000]]]", 20);
+        var readFailure = events.FirstOrDefault(e => e.IsReadError);
 
         var sb = new StringBuilder();
         var count = 0;
-        foreach (var e in events)
+        foreach (var e in events.Where(e => !e.IsReadError))
         {
             var desc = e.Description ?? "";
             if (!SystemEventParser.TryParseBugCheck(desc, out var code, out var driver))
@@ -199,6 +200,11 @@ public static class AiSystemTools
         else
         {
             dumpLine = "转储文件：未找到（C:\\Windows\\Minidump 为空）";
+        }
+
+        if (readFailure != null)
+        {
+            return $"{readFailure.Description}\n无法据此判断近 30 天是否发生过蓝屏。\n{dumpLine}";
         }
 
         return count == 0
@@ -281,6 +287,11 @@ public static class AiSystemTools
     private static string QueryEventsText(string log, string xpath, int max, string title, string emptyText)
     {
         var events = SystemScanner.QueryEvents(log, xpath, max);
+        var readFailure = events.FirstOrDefault(e => e.IsReadError);
+        if (readFailure != null)
+        {
+            return readFailure.Description ?? $"无法读取{title}。";
+        }
         if (events.Count == 0)
         {
             return emptyText;
@@ -320,6 +331,10 @@ public static class AiSystemTools
             {
                 return $"SMART 预警：以下磁盘被标记为预测性故障，请立即备份数据并更换：\n{string.Join("\n", status.FailedDevices.Select(f => $"  {f}"))}";
             }
+            if (status.DeviceCount == 0)
+            {
+                return "未获取到支持该 WMI SMART 接口的磁盘，无法据此判断磁盘健康状态。";
+            }
             return $"SMART 状态：共检查 {status.DeviceCount} 块磁盘，全部正常。";
         }
         catch
@@ -332,6 +347,11 @@ public static class AiSystemTools
     {
         var events = SystemScanner.QueryEvents("Application",
             "*[System[(EventID=1000 or EventID=1001 or EventID=1002 or EventID=1003 or EventID=1026) and Level<=3 and TimeCreated[timediff(@SystemTime) <= 604800000]]]", 30);
+        var readFailure = events.FirstOrDefault(e => e.IsReadError);
+        if (readFailure != null)
+        {
+            return readFailure.Description ?? "无法读取应用程序崩溃记录。";
+        }
 
         var groups = events
             .Select(e => new { App = SystemEventParser.ExtractApplicationName(e.Description ?? ""), e.Time })
@@ -359,14 +379,15 @@ public static class AiSystemTools
     {
         try
         {
-            using var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired");
-            return key != null
-                ? "系统更新已安装但等待重启生效。"
-                : "无待重启生效的更新。";
+            var reasons = SystemScanner.GetPendingRebootReasons();
+            return reasons.Count > 0
+                ? "检测到以下等待重启的系统更改：\n" + string.Join("\n", reasons.Select(reason => $"- {reason}"))
+                : "未检测到等待重启的系统更新、组件维护或文件替换操作。";
         }
-        catch
+        catch (Exception ex)
         {
-            return "无法检查待重启更新状态。";
+            AppLogger.LogError("AI 工具检查待重启状态失败", ex);
+            return $"无法检查待重启状态：{ex.Message}";
         }
     }
 }

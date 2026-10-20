@@ -3,11 +3,12 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
     <RootNamespace>BlueScreenHelper</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <Platforms>x86;x64;ARM64</Platforms>
-    <Platform Condition="'$(Platform)'=='AnyCPU'">x64</Platform>
+    <Platform Condition="'$(Platform)'=='AnyCPU' Or '$(Platform)'=='Any CPU'">x64</Platform>
     <RuntimeIdentifiers>win-x86;win-x64;win-arm64</RuntimeIdentifiers>
     <UseWinUI>true</UseWinUI>
     <WindowsPackageType>None</WindowsPackageType>
@@ -16,7 +17,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <Version>1.0.7</Version>
-    <PublishProfile>Default</PublishProfile>
+    <Authors>Memories-white</Authors>
+    <Product>BlueScreenHelper</Product>
+    <Description>Windows 蓝屏转储分析与系统健康诊断工具</Description>
+    <RepositoryUrl>https://github.com/Memories-white/BlueScreenHelper</RepositoryUrl>
     <EnableMsixTooling>true</EnableMsixTooling>
   </PropertyGroup>
   <ItemGroup>
@@ -27,8 +31,4 @@
   <ItemGroup>
     <Content Include="Assets\app.ico" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
-
-  <Target Name="TrimMuxLanguageFolders" AfterTargets="Build" Condition="'$(OS)' == 'Windows_NT'">
-    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;Get-ChildItem -LiteralPath '$(OutDir)' -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin @('zh-CN','en-us','Microsoft.UI.Xaml','runtimes','Assets') } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue&quot;" />
-  </Target>
 </Project>

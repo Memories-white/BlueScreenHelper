@@ -31,15 +31,20 @@
                     <TextBlock Text="蓝屏诊断助手" FontSize="28" FontWeight="Bold" />
                     <TextBlock Text="分析 .dmp 崩溃转储 · 扫描系统问题 · AI 智能诊断" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="0,4,0,0" />
                 </StackPanel>
-                <Button Grid.Column="1" Click="Refresh_Click" VerticalAlignment="Center">
-                    <Button.Content>
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <SymbolIcon Symbol="Refresh" />
-                            <TextBlock Text="刷新" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </Button.Content>
-                </Button>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                    <ProgressRing x:Name="RefreshRing" Width="22" Height="22" IsActive="False" />
+                    <Button x:Name="RefreshButton" Click="Refresh_Click">
+                        <Button.Content>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <SymbolIcon Symbol="Refresh" />
+                                <TextBlock Text="刷新" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button.Content>
+                    </Button>
+                </StackPanel>
             </Grid>
+
+            <InfoBar x:Name="DashboardStatusBar" IsOpen="False" />
 
             <InfoBar x:Name="WelcomeBar" IsOpen="True" Severity="Informational"
                      CloseButtonClick="WelcomeBar_CloseButtonClick"

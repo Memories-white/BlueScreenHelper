@@ -6,98 +6,203 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_NOLOGO: '1'
+  PROJECT_PATH: BlueScreenHelper/BlueScreenHelper.csproj
+  TEST_PROJECT_PATH: tests/BlueScreenHelper.Tests/BlueScreenHelper.Tests.csproj
 
 jobs:
-  build:
-    name: Build (x64 Release)
+  verify:
+    name: Build & test (x64 Release)
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
-      - name: Restore & build
-        run: dotnet build BlueScreenHelper/BlueScreenHelper.csproj -c Release
+      - name: Restore
+        run: dotnet restore BlueScreenHelper.slnx -p:Platform=x64
+
+      - name: Build with warnings as errors
+        run: >-
+          dotnet build BlueScreenHelper.slnx
+          -c Release
+          -p:Platform=x64
+          -p:ContinuousIntegrationBuild=true
+          --no-restore
+          -warnaserror
+
+      - name: Test
+        run: >-
+          dotnet test $env:TEST_PROJECT_PATH
+          -c Release
+          -p:Platform=x64
+          -p:ContinuousIntegrationBuild=true
+          --no-build
+          --no-restore
+          --logger "trx;LogFileName=BlueScreenHelper.Tests.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: test-results
+          path: tests/BlueScreenHelper.Tests/TestResults/*.trx
+          if-no-files-found: warn
+          retention-days: 7
 
   package:
     name: Package installer (tag only)
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: verify
     runs-on: windows-latest
     permissions:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
+      - name: Validate release version
+        id: version
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+          if ($tag -notmatch '^v(?<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)$') {
+            throw "Release tag '$tag' must use vMAJOR.MINOR.PATCH or a SemVer prerelease suffix."
+          }
+
+          $version = $Matches.version
+          $numericVersion = (($version -split '-', 2)[0]) + '.0'
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "numeric_version=$numericVersion" >> $env:GITHUB_OUTPUT
+
+          # The assembly manifest is embedded during publish, so update it
+          # before building rather than patching the already-built output.
+          $manifestPath = 'BlueScreenHelper/app.manifest'
+          $manifest = Get-Content $manifestPath -Raw
+          $manifest = $manifest -replace '(?<=<assemblyIdentity version=")[^"]+', $numericVersion
+          [System.IO.File]::WriteAllText(
+            $manifestPath,
+            $manifest,
+            [System.Text.UTF8Encoding]::new($false))
+
+      - name: Restore win-x64
+        run: >-
+          dotnet restore $env:PROJECT_PATH
+          -r win-x64
+          -p:Platform=x64
+
       - name: Publish self-contained (win-x64)
-        run: dotnet publish BlueScreenHelper/BlueScreenHelper.csproj -c Release -r win-x64 --self-contained true -o publish/win-x64
+        run: >-
+          dotnet publish $env:PROJECT_PATH
+          -c Release
+          -r win-x64
+          --self-contained true
+          --no-restore
+          -o publish/win-x64
+          -p:Platform=x64
+          -p:Version=${{ steps.version.outputs.version }}
+          -p:ContinuousIntegrationBuild=true
 
       - name: Bundle VC++ runtime libraries
         shell: pwsh
         run: |
-          Copy-Item C:\Windows\System32\vcruntime140.dll, C:\Windows\System32\vcruntime140_1.dll, C:\Windows\System32\msvcp140.dll publish/win-x64/ -Force -ErrorAction SilentlyContinue
-          Get-ChildItem publish/win-x64 -Filter 'vcruntime*'
+          $runtimeFiles = @('vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll')
+          foreach ($file in $runtimeFiles) {
+            $source = Join-Path $env:WINDIR "System32\$file"
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+              throw "Required VC++ runtime file was not found: $source"
+            }
+            Copy-Item -LiteralPath $source -Destination 'publish/win-x64' -Force
+          }
 
-      - name: Trim language folders & create log folder
+      - name: Trim satellite languages and add log help
         shell: pwsh
         run: |
-          Get-ChildItem publish/win-x64 -Directory | Where-Object {
-            $_.Name -notin @('zh-CN', 'en-us', 'Microsoft.UI.Xaml', 'runtimes', 'Assets')
-          } | Remove-Item -Recurse -Force
-          New-Item -ItemType Directory -Force -Path publish/win-x64/log | Out-Null
+          $publishRoot = (Resolve-Path 'publish/win-x64').Path
+          $keepCultures = @('zh-CN', 'en-US')
+
+          foreach ($directory in Get-ChildItem -LiteralPath $publishRoot -Directory) {
+            $culture = $null
+            try {
+              $culture = [System.Globalization.CultureInfo]::GetCultureInfo($directory.Name)
+            } catch [System.Globalization.CultureNotFoundException] {
+              continue
+            }
+
+            if ($keepCultures -notcontains $culture.Name) {
+              $expectedPrefix = $publishRoot + [System.IO.Path]::DirectorySeparatorChar
+              if (-not $directory.FullName.StartsWith($expectedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+                throw "Refusing to remove a directory outside publish output: $($directory.FullName)"
+              }
+              Remove-Item -LiteralPath $directory.FullName -Recurse -Force
+            }
+          }
+
+          $logDirectory = Join-Path $publishRoot 'log'
+          New-Item -ItemType Directory -Force -Path $logDirectory | Out-Null
           $readme = @(
             '此文件夹用于保存程序运行日志。',
             '遇到问题时，请将本文件夹（log）内的 .log 文件打包发给开发者，以便快速定位问题。',
             '若日志未出现在此处，请查看 %LOCALAPPDATA%\BlueScreenHelper\logs。'
           ) -join [Environment]::NewLine
-          [System.IO.File]::WriteAllText("publish/win-x64/log/日志说明.txt", $readme, (New-Object System.Text.UTF8Encoding($false)))
-          Get-ChildItem publish/win-x64 -Directory | Select-Object -ExpandProperty Name
+          [System.IO.File]::WriteAllText(
+            (Join-Path $logDirectory '日志说明.txt'),
+            $readme,
+            [System.Text.UTF8Encoding]::new($false))
+
+          if (-not (Test-Path -LiteralPath (Join-Path $publishRoot 'BlueScreenHelper.exe') -PathType Leaf)) {
+            throw 'Publish output does not contain BlueScreenHelper.exe.'
+          }
 
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
-      - name: Patch version from git tag
-        shell: pwsh
-        run: |
-          $ver = $env:GITHUB_REF -replace 'refs/tags/v', ''
-          $verNoDash = ($ver -split '-')[0]
-
-          $iss = Get-Content installer/installer.iss -Raw
-          $iss = $iss -replace '#define MyAppVersion "[^"]*"', "#define MyAppVersion `"$ver`""
-          [System.IO.File]::WriteAllText("installer/installer.iss", $iss, (New-Object System.Text.UTF8Encoding($true)))
-
-          $csproj = Get-Content BlueScreenHelper/BlueScreenHelper.csproj -Raw
-          if ($csproj -match '<Version>[\s\S]*?</Version>') {
-            $csproj = $csproj -replace '<Version>[\s\S]*?</Version>', "<Version>$verNoDash</Version>"
-          } else {
-            $csproj = $csproj -replace '<TargetFramework>[^<]*</TargetFramework>', "`$0`n    <Version>$verNoDash</Version>"
-          }
-          [System.IO.File]::WriteAllText("BlueScreenHelper/BlueScreenHelper.csproj", $csproj)
-
-          $manifest = Get-Content BlueScreenHelper/app.manifest -Raw
-          $manifest = $manifest -replace 'version="\d+\.\d+\.\d+(\.\d+)?"', "version=`"$verNoDash.0`""
-          [System.IO.File]::WriteAllText("BlueScreenHelper/app.manifest", $manifest)
-
       - name: Compile installer with ISCC
         shell: pwsh
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+          APP_NUMERIC_VERSION: ${{ steps.version.outputs.numeric_version }}
         run: |
-          $iscc = Get-ChildItem "C:\Program Files*\Inno Setup*\ISCC.exe" -Recurse | Select-Object -First 1 -ExpandProperty FullName
-          if (-not $iscc) { throw 'ISCC.exe not found' }
-          & $iscc installer/installer.iss
-          if ($LASTEXITCODE -ne 0) { throw 'ISCC compile failed' }
+          $iscc = Get-ChildItem 'C:\Program Files*\Inno Setup*\ISCC.exe' -Recurse |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $iscc) {
+            throw 'ISCC.exe was not found after installing Inno Setup.'
+          }
+
+          & $iscc "/DMyAppVersion=$env:APP_VERSION" "/DMyAppNumericVersion=$env:APP_NUMERIC_VERSION" 'installer/installer.iss'
+          if ($LASTEXITCODE -ne 0) {
+            throw "ISCC failed with exit code $LASTEXITCODE."
+          }
+
+          $expectedInstaller = "dist/BlueScreenHelper_Setup_$env:APP_VERSION`_win-x64.exe"
+          if (-not (Test-Path -LiteralPath $expectedInstaller -PathType Leaf)) {
+            throw "Expected installer was not created: $expectedInstaller"
+          }
 
       - name: Upload release assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*.exe
-          overwrite: true
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          overwrite_files: true

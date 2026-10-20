@@ -6,12 +6,14 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.Windows.Storage.Pickers;
+using Windows.Storage;
 
 namespace BlueScreenHelper.Views;
 
 public sealed partial class DumpPage : Page
 {
     private DumpAnalysisResult? _result;
+    private long _analysisVersion;
 
     public DumpPage()
     {
@@ -34,8 +36,7 @@ public sealed partial class DumpPage : Page
             {
                 return;
             }
-            FilePathText.Text = file.Path;
-            Analyze(file.Path);
+            await AnalyzeAsync(file.Path);
         }
         catch (Exception ex)
         {
@@ -46,8 +47,11 @@ public sealed partial class DumpPage : Page
         }
     }
 
-    private void Analyze(string path)
+    private async Task AnalyzeAsync(string path)
     {
+        var version = Interlocked.Increment(ref _analysisVersion);
+        _result = null;
+        FilePathText.Text = path;
         StatusBar.IsOpen = true;
         StatusBar.Severity = InfoBarSeverity.Informational;
         StatusBar.Title = "正在解析...";
@@ -56,47 +60,64 @@ public sealed partial class DumpPage : Page
         ParamsExpander.Visibility = Visibility.Collapsed;
         KnowledgeExpander.Visibility = Visibility.Collapsed;
         ModulesExpander.Visibility = Visibility.Collapsed;
+        ParamsExpander.IsExpanded = false;
+        KnowledgeExpander.IsExpanded = false;
+        ModulesExpander.IsExpanded = false;
+        ModulesList.ItemsSource = null;
         AiButton.IsEnabled = false;
         CopyButton.IsEnabled = false;
+        PickButton.IsEnabled = false;
+        AnalyzeRing.IsActive = true;
 
-        _ = Task.Run(() => DumpParser.Parse(path)).ContinueWith(t =>
+        try
         {
-            if (t.IsFaulted && t.Exception != null)
+            var result = await Task.Run(() => DumpParser.Parse(path));
+            if (version == _analysisVersion)
             {
-                DispatcherQueue.TryEnqueue(() =>
-                {
-                    StatusBar.Severity = InfoBarSeverity.Error;
-                    StatusBar.Title = "解析失败";
-                    StatusBar.Message = t.Exception.GetBaseException().Message;
-                    StatusBar.IsOpen = true;
-                });
-                return;
+                ShowResult(result);
             }
-            var r = t.Result;
-            DispatcherQueue.TryEnqueue(() => ShowResult(r));
-        });
+        }
+        catch (Exception ex)
+        {
+            if (version == _analysisVersion)
+            {
+                StatusBar.Severity = InfoBarSeverity.Error;
+                StatusBar.Title = "解析失败";
+                StatusBar.Message = ex.Message;
+                StatusBar.IsOpen = true;
+            }
+        }
+        finally
+        {
+            if (version == _analysisVersion)
+            {
+                PickButton.IsEnabled = true;
+                AnalyzeRing.IsActive = false;
+            }
+        }
     }
 
     private void ShowResult(DumpAnalysisResult r)
     {
-        _result = r;
-        ResultPanel.Visibility = Visibility.Visible;
-        AiButton.IsEnabled = true;
-        CopyButton.IsEnabled = true;
-
         if (!r.IsValidMinidump)
         {
+            _result = null;
             StatusBar.Severity = InfoBarSeverity.Warning;
             StatusBar.Title = "无法解析该文件";
-            StatusBar.Message = r.Error;
+            StatusBar.Message = string.IsNullOrWhiteSpace(r.Error) ? "文件不是受支持的 Windows 转储格式。" : r.Error;
             ResultPanel.Visibility = Visibility.Collapsed;
             ParamsExpander.Visibility = Visibility.Collapsed;
             KnowledgeExpander.Visibility = Visibility.Collapsed;
             ModulesExpander.Visibility = Visibility.Collapsed;
-            AiButton.IsEnabled = true;
+            AiButton.IsEnabled = false;
+            CopyButton.IsEnabled = false;
             return;
         }
 
+        _result = r;
+        ResultPanel.Visibility = Visibility.Visible;
+        AiButton.IsEnabled = true;
+        CopyButton.IsEnabled = true;
         StatusBar.Severity = InfoBarSeverity.Success;
         StatusBar.Title = r.IsKernelDump ? "解析完成：系统蓝屏转储" : "解析完成：用户态转储";
         StatusBar.Message = r.IsKernelDump
@@ -113,7 +134,9 @@ public sealed partial class DumpPage : Page
             ? $"{r.DumpTypeText}（{r.ProcessorArch}）"
             : $"用户态转储{((r.ProcessId is uint pid) ? $" · 进程 ID：{pid}" : "")}";
         ExText.Text = r.ExceptionCode is uint ec
-            ? $"0x{ec:X8} @ 0x{r.ExceptionAddress:X}" + (r.ExceptionAddress.HasValue ? "" : "")
+            ? r.ExceptionAddress is ulong address
+                ? $"0x{ec:X8} @ 0x{address:X}"
+                : $"0x{ec:X8}（地址未知）"
             : "无异常记录";
 
         var paramMeanings = DumpParser.GetBugCheckParamMeanings(r.BugCheckCode);
@@ -144,19 +167,70 @@ public sealed partial class DumpPage : Page
         }
     }
 
+    private void Page_DragOver(object sender, DragEventArgs e)
+    {
+        if (e.DataView.Contains(StandardDataFormats.StorageItems))
+        {
+            e.AcceptedOperation = DataPackageOperation.Copy;
+            e.DragUIOverride.Caption = "打开转储文件";
+            e.DragUIOverride.IsCaptionVisible = true;
+        }
+    }
+
+    private async void Page_Drop(object sender, DragEventArgs e)
+    {
+        if (!e.DataView.Contains(StandardDataFormats.StorageItems))
+        {
+            return;
+        }
+
+        try
+        {
+            var items = await e.DataView.GetStorageItemsAsync();
+            var file = items.OfType<StorageFile>().FirstOrDefault();
+            if (file == null || !string.Equals(file.FileType, ".dmp", StringComparison.OrdinalIgnoreCase))
+            {
+                StatusBar.Severity = InfoBarSeverity.Warning;
+                StatusBar.Title = "不支持的文件";
+                StatusBar.Message = "请拖入扩展名为 .dmp 的 Windows 转储文件。";
+                StatusBar.IsOpen = true;
+                return;
+            }
+            await AnalyzeAsync(file.Path);
+        }
+        catch (Exception ex)
+        {
+            StatusBar.Severity = InfoBarSeverity.Error;
+            StatusBar.Title = "打开文件失败";
+            StatusBar.Message = ex.Message;
+            StatusBar.IsOpen = true;
+        }
+    }
+
     private void CopyReport_Click(object sender, RoutedEventArgs e)
     {
         if (_result == null)
         {
             return;
         }
-        var text = DumpParser.BuildReportMarkdown(_result);
-        var package = new DataPackage();
-        package.SetText(text);
-        Clipboard.SetContent(package);
-        StatusBar.Severity = InfoBarSeverity.Success;
-        StatusBar.Title = "已复制";
-        StatusBar.Message = "分析报告（Markdown 格式）已复制到剪贴板，可粘贴到文档或 AI 对话中。";
+        try
+        {
+            var text = DumpParser.BuildReportMarkdown(_result);
+            var package = new DataPackage();
+            package.SetText(text);
+            Clipboard.SetContent(package);
+            StatusBar.Severity = InfoBarSeverity.Success;
+            StatusBar.Title = "已复制";
+            StatusBar.Message = "分析报告（Markdown 格式）已复制到剪贴板，可粘贴到文档或 AI 对话中。";
+            StatusBar.IsOpen = true;
+        }
+        catch (Exception ex)
+        {
+            StatusBar.Severity = InfoBarSeverity.Error;
+            StatusBar.Title = "复制失败";
+            StatusBar.Message = ex.Message;
+            StatusBar.IsOpen = true;
+        }
     }
 
     private void AiDiagnose_Click(object sender, RoutedEventArgs e)

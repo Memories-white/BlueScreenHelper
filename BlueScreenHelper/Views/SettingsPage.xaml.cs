@@ -107,6 +107,7 @@ public sealed partial class SettingsPage : Page
             TempValueText.Text = DescribeTemperature(TempSlider.Value);
             SaveButton.IsEnabled = has;
             TestButton.IsEnabled = has;
+            DeleteConfigButton.IsEnabled = cfg != null && AppState.Settings.AIConfigs.Contains(cfg);
         }
         finally
         {
@@ -158,23 +159,18 @@ public sealed partial class SettingsPage : Page
             return;
         }
 
-        var cfg = AppState.Settings.AIConfigs.FirstOrDefault(c => c.Provider == template.Provider);
-        if (cfg == null)
-        {
-            cfg = new AIConfigItem
-            {
-                Name = template.Name,
-                Provider = template.Provider,
-                ApiBaseUrl = template.ApiBaseUrl
-            };
-            AppState.Settings.AIConfigs.Add(cfg);
-        }
-        else
-        {
-            cfg.ApiBaseUrl = DeepSeekEndpoints.ForProvider(cfg.Provider);
-        }
-        AppState.Settings.ActiveConfigName = cfg.Name;
-        RefreshConfigs();
+        var cfg = AppState.Settings.AIConfigs.FirstOrDefault(c => c.Provider == template.Provider)
+                  ?? new AIConfigItem
+                  {
+                      Name = template.Name,
+                      Provider = template.Provider,
+                      ApiBaseUrl = template.ApiBaseUrl,
+                      Model = template.Model,
+                      Temperature = template.Temperature,
+                      SystemPrompt = template.SystemPrompt
+                  };
+        cfg.ApiBaseUrl = DeepSeekEndpoints.ForProvider(cfg.Provider);
+        LoadConfigToFields(cfg);
     }
 
     private void UpdateFetchModelsState(bool resetStatus = false)
@@ -343,9 +339,41 @@ public sealed partial class SettingsPage : Page
         {
             return;
         }
+        if (string.IsNullOrWhiteSpace(ApiKeyBox.Password))
+        {
+            ShowBar(InfoBarSeverity.Warning, "尚未填写 API Key", "请先填写 DeepSeek API Key。");
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(ModelBox.Text))
+        {
+            ShowBar(InfoBarSeverity.Warning, "模型名称不能为空", "请查询或输入一个可用的模型名称。");
+            return;
+        }
+
+        var isNew = !AppState.Settings.AIConfigs.Contains(_current);
+        var previousActiveName = AppState.Settings.ActiveConfigName;
+        var previousValues = CloneConfig(_current);
         WriteFieldsToConfig(_current);
+        if (isNew)
+        {
+            AppState.Settings.AIConfigs.Add(_current);
+        }
         AppState.Settings.ActiveConfigName = _current.Name;
-        AppState.Settings.Save();
+        if (!AppState.Settings.Save())
+        {
+            if (isNew)
+            {
+                AppState.Settings.AIConfigs.Remove(_current);
+            }
+            else
+            {
+                RestoreConfig(_current, previousValues);
+            }
+            AppState.Settings.ActiveConfigName = previousActiveName;
+            ShowBar(InfoBarSeverity.Error, "保存配置失败",
+                $"无法写入配置文件，请检查目录权限或查看日志：{AppLogger.LogDir}");
+            return;
+        }
         RefreshConfigs();
         ShowBar(InfoBarSeverity.Success, "配置已保存",
             $"配置文件位置：{AppSettings.ConfigFilePath}\n该配置现已出现在“AI 诊断助手”页面的下拉列表中。");
@@ -363,7 +391,8 @@ public sealed partial class SettingsPage : Page
             return;
         }
 
-        WriteFieldsToConfig(_current);
+        var testConfig = CloneConfig(_current);
+        WriteFieldsToConfig(testConfig);
         TestButton.IsEnabled = false;
         TestRing.IsActive = true;
         SaveBar.IsOpen = false;
@@ -371,7 +400,7 @@ public sealed partial class SettingsPage : Page
         try
         {
             var ai = new AIService();
-            var result = await ai.TestConnectionAsync(_current);
+            var result = await ai.TestConnectionAsync(testConfig);
             ShowBar(InfoBarSeverity.Success, "连接成功", $"接口与模型可用，返回：{result}");
         }
         catch (Exception ex)
@@ -384,6 +413,67 @@ public sealed partial class SettingsPage : Page
             TestRing.IsActive = false;
             SaveBar.IsOpen = true;
         }
+    }
+
+    private async void DeleteConfig_Click(object sender, RoutedEventArgs e)
+    {
+        if (_current == null || !AppState.Settings.AIConfigs.Contains(_current))
+        {
+            return;
+        }
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "删除 AI 配置？",
+            Content = $"将删除“{_current.Name}”及其本机保存的 API Key。",
+            PrimaryButtonText = "删除",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Close
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        var removed = _current;
+        var index = AppState.Settings.AIConfigs.IndexOf(removed);
+        var previousActiveName = AppState.Settings.ActiveConfigName;
+        AppState.Settings.AIConfigs.RemoveAt(index);
+        AppState.Settings.ActiveConfigName = AppState.Settings.AIConfigs.FirstOrDefault()?.Name ?? "";
+        if (!AppState.Settings.Save())
+        {
+            AppState.Settings.AIConfigs.Insert(index, removed);
+            AppState.Settings.ActiveConfigName = previousActiveName;
+            ShowBar(InfoBarSeverity.Error, "删除配置失败",
+                $"无法写入配置文件，请检查目录权限或查看日志：{AppLogger.LogDir}");
+            return;
+        }
+
+        RefreshConfigs();
+        ShowBar(InfoBarSeverity.Success, "配置已删除", $"已删除“{removed.Name}”。");
+    }
+
+    private static AIConfigItem CloneConfig(AIConfigItem source) => new()
+    {
+        Name = source.Name,
+        Provider = source.Provider,
+        ApiBaseUrl = source.ApiBaseUrl,
+        ApiKey = source.ApiKey,
+        Model = source.Model,
+        Temperature = source.Temperature,
+        SystemPrompt = source.SystemPrompt
+    };
+
+    private static void RestoreConfig(AIConfigItem target, AIConfigItem source)
+    {
+        target.Name = source.Name;
+        target.Provider = source.Provider;
+        target.ApiBaseUrl = source.ApiBaseUrl;
+        target.ApiKey = source.ApiKey;
+        target.Model = source.Model;
+        target.Temperature = source.Temperature;
+        target.SystemPrompt = source.SystemPrompt;
     }
 
     private void ShowBar(InfoBarSeverity severity, string title, string message)

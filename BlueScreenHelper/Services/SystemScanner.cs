@@ -109,6 +109,10 @@ public static class SystemScanner
     {
         var events = QueryEvents("System",
             "*[System[(EventID=1001) and TimeCreated[timediff(@SystemTime) <= 2592000000]]]", 20);
+        if (TryReportEventReadFailure(events, issues, "蓝屏事件记录"))
+        {
+            return;
+        }
 
         var bugChecks = new List<(uint Code, string CodeHex, string Name, DateTime? Time, string? Driver)>();
         foreach (var e in events)
@@ -187,6 +191,10 @@ public static class SystemScanner
     {
         var events = QueryEvents("System",
             "*[System[(EventID=6008) and TimeCreated[timediff(@SystemTime) <= 2592000000]]]", 5);
+        if (TryReportEventReadFailure(events, issues, "异常关机记录"))
+        {
+            return;
+        }
         if (events.Count == 0)
         {
             return;
@@ -209,6 +217,10 @@ public static class SystemScanner
     {
         var events = QueryEvents("System",
             "*[System[Provider[@Name='Microsoft-Windows-WHEA-Logger'] and (EventID=17 or EventID=18 or EventID=19 or EventID=46 or EventID=47 or EventID=1) and TimeCreated[timediff(@SystemTime) <= 2592000000]]]", 5);
+        if (TryReportEventReadFailure(events, issues, "WHEA 硬件错误记录"))
+        {
+            return;
+        }
         if (events.Count == 0)
         {
             return;
@@ -232,6 +244,10 @@ public static class SystemScanner
     {
         var events = QueryEvents("System",
             "*[System[(EventID=7 or EventID=11 or EventID=51 or EventID=153 or EventID=55) and (Provider[@Name='disk'] or Provider[@Name='Ntfs']) and TimeCreated[timediff(@SystemTime) <= 2592000000]]]", 5);
+        if (TryReportEventReadFailure(events, issues, "磁盘与文件系统错误记录"))
+        {
+            return;
+        }
         if (events.Count == 0)
         {
             return;
@@ -254,6 +270,10 @@ public static class SystemScanner
     {
         var events = QueryEvents("System",
             "*[System[Provider[@Name='Microsoft-Windows-MemoryDiagnostics-Results'] and (EventID=1101 or EventID=1102 or EventID=1201 or EventID=1202) and TimeCreated[timediff(@SystemTime) <= 2592000000]]]", 5);
+        if (TryReportEventReadFailure(events, issues, "内存诊断记录"))
+        {
+            return;
+        }
         if (events.Count == 0)
         {
             issues.Add(new ScanIssue
@@ -339,6 +359,10 @@ public static class SystemScanner
     {
         var events = QueryEvents("System",
             "*[System[Provider[@Name='Microsoft-Windows-Kernel-PnP'] and (EventID=219 or EventID=410) and TimeCreated[timediff(@SystemTime) <= 2592000000]]]", 10);
+        if (TryReportEventReadFailure(events, issues, "驱动加载失败记录"))
+        {
+            return;
+        }
         if (events.Count == 0)
         {
             return;
@@ -425,6 +449,10 @@ public static class SystemScanner
     {
         var events = QueryEvents("Application",
             "*[System[(EventID=1000 or EventID=1001 or EventID=1002 or EventID=1003 or EventID=1026) and Level<=3 and TimeCreated[timediff(@SystemTime) <= 604800000]]]", 30);
+        if (TryReportEventReadFailure(events, issues, "应用程序崩溃记录"))
+        {
+            return;
+        }
 
         var groups = events
             .Select(e => new
@@ -461,29 +489,67 @@ public static class SystemScanner
     {
         try
         {
-            using var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired");
-            if (key != null)
+            var reasons = GetPendingRebootReasons();
+            if (reasons.Count > 0)
             {
                 issues.Add(new ScanIssue
                 {
                     Category = "系统",
-                    Title = "系统更新需要重启",
+                    Title = "系统更改需要重启",
                     Severity = IssueSeverity.Info,
-                    Description = "Windows 更新已安装但尚未重启生效。",
-                    Recommendation = "请及时重启电脑，未完成更新的系统可能影响稳定性。"
+                    Description = "以下系统更改正在等待重启完成：\n" +
+                                  string.Join("\n", reasons.Select(reason => $"- {reason}")),
+                    Recommendation = "请保存工作后及时重启电脑；未完成的更新、组件维护或文件替换可能影响系统稳定性。"
                 });
             }
         }
-        catch
+        catch (Exception ex)
         {
+            AppLogger.LogError("检查待重启状态失败", ex);
         }
+    }
+
+    internal static IReadOnlyList<string> GetPendingRebootReasons()
+    {
+        var reasons = new List<string>();
+
+        using (var windowsUpdate = Registry.LocalMachine.OpenSubKey(
+                   @"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired"))
+        {
+            if (windowsUpdate != null)
+            {
+                reasons.Add("Windows 更新等待重启");
+            }
+        }
+
+        using (var componentServicing = Registry.LocalMachine.OpenSubKey(
+                   @"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending"))
+        {
+            if (componentServicing != null)
+            {
+                reasons.Add("Windows 组件维护等待重启");
+            }
+        }
+
+        using (var sessionManager = Registry.LocalMachine.OpenSubKey(
+                   @"SYSTEM\CurrentControlSet\Control\Session Manager"))
+        {
+            if (sessionManager?.GetValue("PendingFileRenameOperations") != null ||
+                sessionManager?.GetValue("PendingFileRenameOperations2") != null)
+            {
+                reasons.Add("文件替换或删除操作等待重启");
+            }
+        }
+
+        return reasons;
     }
 
     internal static string BuildEventDetail(List<EventInfo> events, string title, string note)
     {
+        var actualEvents = events.Where(e => !e.IsReadError).ToList();
         var sb = new StringBuilder();
-        sb.AppendLine($"{title}（共 {events.Count} 条，按时间倒序）：");
-        foreach (var e in events)
+        sb.AppendLine($"{title}（共 {actualEvents.Count} 条，按时间倒序）：");
+        foreach (var e in actualEvents)
         {
             var desc = e.Description ?? "";
             if (desc.Length > 200)
@@ -532,12 +598,35 @@ public static class SystemScanner
         }
         catch (Exception ex)
         {
-            if (result.Count == 0)
+            AppLogger.LogError($"读取事件日志失败: {logName}", ex);
+            result.Add(new EventInfo
             {
-                result.Add(new EventInfo { Id = 0, Time = null, Level = "Error", Description = $"读取事件日志失败：{ex.Message}" });
-            }
+                IsReadError = true,
+                Level = "Error",
+                Description = $"读取事件日志失败：{ex.Message}"
+            });
         }
         return result;
+    }
+
+    private static bool TryReportEventReadFailure(
+        List<EventInfo> events, List<ScanIssue> issues, string dataName)
+    {
+        var failure = events.FirstOrDefault(e => e.IsReadError);
+        if (failure == null)
+        {
+            return false;
+        }
+
+        issues.Add(new ScanIssue
+        {
+            Category = "系统日志",
+            Title = $"无法读取{dataName}",
+            Severity = IssueSeverity.Info,
+            Description = failure.Description ?? $"读取{dataName}时发生未知错误，相关扫描结果不完整。",
+            Recommendation = "确认 Windows Event Log 服务正在运行；如仍失败，可尝试以管理员身份运行本程序。"
+        });
+        return true;
     }
 
     private static string SafeLevel(byte? level)
@@ -554,6 +643,7 @@ public static class SystemScanner
 
     internal sealed class EventInfo
     {
+        public bool IsReadError { get; set; }
         public int Id { get; set; }
         public DateTime? Time { get; set; }
         public string Level { get; set; } = "";

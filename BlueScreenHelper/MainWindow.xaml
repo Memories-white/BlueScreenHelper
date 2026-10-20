@@ -19,39 +19,43 @@
 
         <NavigationView x:Name="NavView"
                         Grid.Row="1"
-                        PaneDisplayMode="Left"
+                        PaneDisplayMode="Auto"
+                        CompactModeThresholdWidth="760"
+                        ExpandedModeThresholdWidth="1000"
+                        CompactPaneLength="48"
+                        OpenPaneLength="220"
                         IsTitleBarAutoPaddingEnabled="False"
                         IsBackButtonVisible="Collapsed"
                         IsSettingsVisible="False"
                         SelectionChanged="NavView_SelectionChanged">
             <NavigationView.MenuItems>
-                <NavigationViewItem Content="首页" Tag="dashboard">
+                <NavigationViewItem Content="首页" Tag="dashboard" ToolTipService.ToolTip="首页">
                     <NavigationViewItem.Icon>
                         <SymbolIcon Symbol="Home" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
-                <NavigationViewItem Content="转储分析" Tag="dump">
+                <NavigationViewItem Content="转储分析" Tag="dump" ToolTipService.ToolTip="转储分析">
                     <NavigationViewItem.Icon>
                         <SymbolIcon Symbol="Document" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
-                <NavigationViewItem Content="系统扫描" Tag="scanner">
+                <NavigationViewItem Content="系统扫描" Tag="scanner" ToolTipService.ToolTip="系统扫描">
                     <NavigationViewItem.Icon>
                         <SymbolIcon Symbol="Repair" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
-                <NavigationViewItem Content="AI 诊断" Tag="ai">
+                <NavigationViewItem Content="AI 诊断" Tag="ai" ToolTipService.ToolTip="AI 诊断">
                     <NavigationViewItem.Icon>
                         <SymbolIcon Symbol="Comment" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
-                <NavigationViewItem Content="设置" Tag="settings">
+                <NavigationViewItem Content="设置" Tag="settings" ToolTipService.ToolTip="设置">
                     <NavigationViewItem.Icon>
                         <SymbolIcon Symbol="Setting" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
             </NavigationView.MenuItems>
-            <Frame x:Name="ContentFrame" />
+            <Frame x:Name="ContentFrame" IsNavigationStackEnabled="False" />
         </NavigationView>
     </Grid>
 </Window>

@@ -76,8 +76,9 @@
                 </StackPanel>
                 <ComboBox x:Name="AIBox" Grid.Column="1" Width="220" DisplayMemberPath="Name"
                           VerticalAlignment="Center" Margin="0,0,10,0"
+                          SelectionChanged="AIBox_SelectionChanged"
                           ToolTipService.ToolTip="选择 AI 配置（在“设置”页保存的配置才会出现在这里）" />
-                <Button Grid.Column="2" VerticalAlignment="Center" Click="Clear_Click">
+                <Button x:Name="ClearButton" Grid.Column="2" VerticalAlignment="Center" Click="Clear_Click">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <SymbolIcon Symbol="Delete" />
                         <TextBlock Text="清空对话" VerticalAlignment="Center" />
@@ -128,7 +129,11 @@
 
             <InfoBar x:Name="AiBar" Grid.Row="2" IsOpen="False" Severity="Warning"
                      Title="尚未保存任何 AI 配置"
-                     Message="请前往“设置”页面，从预设模板创建并保存一个 AI 服务配置。" />
+                     Message="请前往“设置”页面，从预设模板创建并保存一个 AI 服务配置。">
+                <InfoBar.ActionButton>
+                    <Button Content="前往设置" Click="OpenSettings_Click" />
+                </InfoBar.ActionButton>
+            </InfoBar>
 
             <Border Grid.Row="3" Background="{ThemeResource LayerFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1"
@@ -171,6 +176,7 @@
                 <TextBox x:Name="InputBox" PlaceholderText="输入问题（回车发送，Ctrl+Enter 换行）"
                          AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="140"
                          ScrollViewer.VerticalScrollBarVisibility="Auto"
+                         TextChanged="InputBox_TextChanged"
                          KeyDown="InputBox_KeyDown" />
                 <Button x:Name="SendButton" Grid.Column="1" VerticalAlignment="Bottom"
                         Click="Send_Click" Style="{StaticResource AccentButtonStyle}">

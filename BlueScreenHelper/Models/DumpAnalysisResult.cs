@@ -36,6 +36,7 @@ public sealed class DumpAnalysisResult
 
     public uint? ExceptionCode { get; set; }
     public ulong? ExceptionAddress { get; set; }
+    public uint? ThreadId { get; set; }
     public uint? ProcessId { get; set; }
 
     public string? FaultingModule { get; set; }

@@ -32,8 +32,16 @@ public sealed partial class ScannerPage : Page
         ScanRing.IsActive = true;
         StatusText.Text = "正在扫描系统...";
         SummaryBar.IsOpen = false;
+        _report = null;
+        ReportPanel.Visibility = Visibility.Collapsed;
+        CopyScanButton.IsEnabled = false;
+        AiScanButton.IsEnabled = false;
+        FilterBox.IsEnabled = false;
+        SortSeverity.IsEnabled = false;
+        SortTime.IsEnabled = false;
         _visibleIssues.Clear();
         EmptyText.Text = "正在扫描...";
+        EmptyText.Visibility = Visibility.Visible;
 
         try
         {
@@ -61,6 +69,12 @@ public sealed partial class ScannerPage : Page
     private void ShowReport(ScanReport report)
     {
         _report = report;
+        ReportPanel.Visibility = Visibility.Visible;
+        CopyScanButton.IsEnabled = true;
+        AiScanButton.IsEnabled = true;
+        FilterBox.IsEnabled = true;
+        SortSeverity.IsEnabled = true;
+        SortTime.IsEnabled = true;
         EmptyText.Text = "未发现任何问题";
         ApplyFilter();
 
@@ -78,7 +92,9 @@ public sealed partial class ScannerPage : Page
         SummaryBar.Title = $"扫描完成：发现 {report.CriticalCount} 个严重问题、{report.WarningCount} 个警告、{report.InfoCount} 条提示";
         SummaryBar.Message = report.CriticalCount > 0
             ? "发现严重问题，建议优先处理，并使用“AI 分析扫描结果”获取详细修复方案。"
-            : "系统整体状态良好。";
+            : report.WarningCount > 0
+                ? "发现需要关注的警告，建议查看详情并按建议逐项排查。"
+                : "系统整体状态良好。";
         SummaryBar.IsOpen = true;
     }
 
@@ -106,6 +122,7 @@ public sealed partial class ScannerPage : Page
             _visibleIssues.Add(i);
         }
         EmptyText.Text = _report.Issues.Count == 0 ? "未发现任何问题" : "当前筛选条件下没有结果";
+        EmptyText.Visibility = _visibleIssues.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void Sort_Changed(object sender, RoutedEventArgs e)
@@ -162,13 +179,23 @@ public sealed partial class ScannerPage : Page
         {
             return;
         }
-        var package = new DataPackage();
-        package.SetText(text);
-        Clipboard.SetContent(package);
-        SummaryBar.Severity = InfoBarSeverity.Success;
-        SummaryBar.Title = "已复制";
-        SummaryBar.Message = "扫描报告（Markdown）已复制到剪贴板。";
-        SummaryBar.IsOpen = true;
+        try
+        {
+            var package = new DataPackage();
+            package.SetText(text);
+            Clipboard.SetContent(package);
+            SummaryBar.Severity = InfoBarSeverity.Success;
+            SummaryBar.Title = "已复制";
+            SummaryBar.Message = "扫描报告（Markdown）已复制到剪贴板。";
+            SummaryBar.IsOpen = true;
+        }
+        catch (Exception ex)
+        {
+            SummaryBar.Severity = InfoBarSeverity.Error;
+            SummaryBar.Title = "复制失败";
+            SummaryBar.Message = ex.Message;
+            SummaryBar.IsOpen = true;
+        }
     }
 
     private void AiScan_Click(object sender, RoutedEventArgs e)

@@ -1,11 +1,15 @@
 ﻿; BlueScreenHelper installer script
 #define MyAppName "蓝屏诊断助手 BlueScreenHelper"
 #define MyAppShortName "蓝屏诊断助手"
-#define MyAppVersion "1.0.2"
+#ifndef MyAppVersion
+  #define MyAppVersion "1.0.7"
+#endif
+#ifndef MyAppNumericVersion
+  #define MyAppNumericVersion "1.0.7.0"
+#endif
 #define MyAppExeName "BlueScreenHelper.exe"
 #define MyAppPublisher "Memories-white"
 #define MyAppURL "https://github.com/Memories-white/BlueScreenHelper"
-#define MyAppAssocName MyAppName + ".dmp"
 #define SourceDir "..\publish\win-x64"
 #define OutputDir "..\dist"
 
@@ -18,6 +22,7 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
+AppCopyright=Copyright (C) Memories-white
 DefaultDirName={autopf}\BlueScreenHelper
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
@@ -28,10 +33,20 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+MinVersion=10.0.17763
 UninstallDisplayIcon={app}\{#MyAppExeName}
 PrivilegesRequired=admin
 SetupIconFile=..\BlueScreenHelper\Assets\app.ico
 UninstallDisplayName={#MyAppName}
+CloseApplications=yes
+RestartApplications=no
+SetupLogging=yes
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoDescription={#MyAppName} 安装程序
+VersionInfoProductName={#MyAppName}
+VersionInfoProductVersion={#MyAppNumericVersion}
+VersionInfoProductTextVersion={#MyAppVersion}
+VersionInfoVersion={#MyAppNumericVersion}
 
 [Languages]
 Name: "chinesesimp"; MessagesFile: "Languages\ChineseSimplified.isl"
@@ -52,7 +67,7 @@ Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppShortName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall
+Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [Code]
 procedure CurStepChanged(CurStep: TSetupStep);

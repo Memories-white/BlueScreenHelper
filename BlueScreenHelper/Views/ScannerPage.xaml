@@ -41,7 +41,7 @@
 
         <InfoBar x:Name="SummaryBar" Grid.Row="2" IsOpen="False" />
 
-        <Border Grid.Row="3" Style="{StaticResource CardStyle}" Visibility="Collapsed">
+        <Border x:Name="ReportPanel" Grid.Row="3" Style="{StaticResource CardStyle}" Visibility="Collapsed">
             <Grid ColumnSpacing="24">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
@@ -54,13 +54,13 @@
                 <StackPanel Grid.Column="1">
                     <TextBlock FontWeight="SemiBold" Text="扫描操作" Margin="0,0,0,6" />
                     <StackPanel Orientation="Horizontal" Spacing="10">
-                        <Button x:Name="CopyScanButton" Click="CopyScan_Click">
+                        <Button x:Name="CopyScanButton" Click="CopyScan_Click" IsEnabled="False">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <SymbolIcon Symbol="Copy" />
                                 <TextBlock Text="复制报告" VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
-                        <Button x:Name="AiScanButton" Click="AiScan_Click">
+                        <Button x:Name="AiScanButton" Click="AiScan_Click" IsEnabled="False">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <SymbolIcon Symbol="Comment" />
                                 <TextBlock Text="AI 分析扫描结果" VerticalAlignment="Center" />
@@ -77,7 +77,7 @@
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
             <StackPanel Orientation="Horizontal" Spacing="12">
-                <ComboBox x:Name="FilterBox" Width="220"
+                <ComboBox x:Name="FilterBox" Width="220" IsEnabled="False"
                           SelectionChanged="FilterBox_SelectionChanged">
                     <ComboBoxItem Content="全部问题" Tag="all" IsSelected="True" />
                     <ComboBoxItem Content="仅严重问题" Tag="critical" />
@@ -86,8 +86,8 @@
                 </ComboBox>
                 <TextBlock Text="排序：" VerticalAlignment="Center"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                <RadioButton x:Name="SortSeverity" Content="按严重程度" IsChecked="True" Checked="Sort_Changed" />
-                <RadioButton x:Name="SortTime" Content="按时间" Checked="Sort_Changed" />
+                <RadioButton x:Name="SortSeverity" Content="按严重程度" IsChecked="True" IsEnabled="False" Checked="Sort_Changed" />
+                <RadioButton x:Name="SortTime" Content="按时间" IsEnabled="False" Checked="Sort_Changed" />
             </StackPanel>
             <ListView x:Name="IssueList" Grid.Row="1" SelectionMode="None"
                       ScrollViewer.VerticalScrollBarVisibility="Auto">

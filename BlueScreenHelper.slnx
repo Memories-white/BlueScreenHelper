@@ -1,3 +1,11 @@
 <Solution>
-  <Project Path="BlueScreenHelper/BlueScreenHelper.csproj" />
+  <Configurations>
+    <Platform Name="x64" />
+  </Configurations>
+  <Project Path="BlueScreenHelper/BlueScreenHelper.csproj">
+    <Platform Project="x64" />
+  </Project>
+  <Project Path="tests/BlueScreenHelper.Tests/BlueScreenHelper.Tests.csproj">
+    <Platform Project="x64" />
+  </Project>
 </Solution>
