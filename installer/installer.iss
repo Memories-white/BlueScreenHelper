@@ -13,6 +13,10 @@
 #define SourceDir "..\publish\win-x64"
 #define OutputDir "..\dist"
 
+#if !FileExists(SourceDir + "\" + MyAppExeName)
+  #error "Publish output is missing BlueScreenHelper.exe. Run scripts\Build-Installer.ps1 first."
+#endif
+
 [Setup]
 AppId={{9E2D1C4A-5B7F-4A8E-9C3D-6F8B2A1E4D57}
 AppName={#MyAppName}
@@ -22,6 +26,8 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
+AppContact={#MyAppURL}/issues
+AppComments=Windows 蓝屏转储分析与系统健康诊断工具
 AppCopyright=Copyright (C) Memories-white
 DefaultDirName={autopf}\BlueScreenHelper
 DefaultGroupName={#MyAppName}
@@ -36,6 +42,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.17763
 UninstallDisplayIcon={app}\{#MyAppExeName}
 PrivilegesRequired=admin
+PrivilegesRequiredOverridesAllowed=dialog
 SetupIconFile=..\BlueScreenHelper\Assets\app.ico
 UninstallDisplayName={#MyAppName}
 CloseApplications=yes
@@ -47,6 +54,7 @@ VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#MyAppNumericVersion}
 VersionInfoProductTextVersion={#MyAppVersion}
 VersionInfoVersion={#MyAppNumericVersion}
+VersionInfoOriginalFileName=BlueScreenHelper_Setup.exe
 
 [Languages]
 Name: "chinesesimp"; MessagesFile: "Languages\ChineseSimplified.isl"
@@ -59,7 +67,7 @@ Name: "{app}\log"; Permissions: users-modify
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SourceDir}\*"; DestDir: "{app}"; Excludes: "*.pdb"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppShortName}"; Filename: "{app}\{#MyAppExeName}"

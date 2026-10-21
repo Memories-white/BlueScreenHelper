@@ -98,6 +98,81 @@ public sealed class DumpParserTests : IDisposable
         Assert.Contains("目录位置超出文件范围", result.Error);
     }
 
+    [Fact]
+    public void GetBugCheckParamMeanings_IrqlNotLessOrEqual_UsesDocumentedOrder()
+    {
+        var meanings = DumpParser.GetBugCheckParamMeanings(0x0A);
+
+        Assert.NotNull(meanings);
+        Assert.Contains("内存地址", meanings![0]);
+        Assert.Contains("IRQL", meanings[1]);
+        Assert.Contains("read", meanings[2]);
+        Assert.Contains("指令地址", meanings[3]);
+        Assert.Null(DumpParser.GetBugCheckParamMeanings(0xA1));
+    }
+
+    [Fact]
+    public void BuildReportMarkdown_UserModeDump_IncludesExceptionEvidence()
+    {
+        var result = new BlueScreenHelper.Models.DumpAnalysisResult
+        {
+            IsValidMinidump = true,
+            FilePath = @"C:\\Crash Dumps\\sample.dmp",
+            FileSize = 4096,
+            ExceptionCode = 0xC0000005,
+            ExceptionAddress = 0x00007FF612341234,
+            FaultingModule = "example.dll",
+            ProcessId = 4242,
+            ThreadId = 77
+        };
+
+        var report = DumpParser.BuildReportMarkdown(result);
+
+        Assert.StartsWith("# 应用程序崩溃转储分析报告", report);
+        Assert.Contains("0xC0000005", report);
+        Assert.Contains("0x7FF612341234", report);
+        Assert.Contains("example.dll", report);
+        Assert.Contains("4242", report);
+        Assert.Contains("77", report);
+    }
+
+    [Fact]
+    public void BuildReportMarkdown_InvalidDump_IncludesParseErrorAndStops()
+    {
+        var result = new BlueScreenHelper.Models.DumpAnalysisResult
+        {
+            FilePath = "broken.dmp",
+            Error = "文件结构已损坏。"
+        };
+
+        var report = DumpParser.BuildReportMarkdown(result);
+
+        Assert.Contains("## 解析结果", report);
+        Assert.Contains("文件结构已损坏", report);
+        Assert.DoesNotContain("## 已加载模块", report);
+    }
+
+    [Fact]
+    public void BuildReportMarkdown_KnownBugCheck_IncludesSafetyAndVerification()
+    {
+        var result = new BlueScreenHelper.Models.DumpAnalysisResult
+        {
+            IsValidMinidump = true,
+            FilePath = "storage-crash.dmp",
+            BugCheckCode = 0x24,
+            BugCheckName = "NTFS_FILE_SYSTEM",
+            FaultingModule = "vendorstorage.sys",
+            Knowledge = BugCheckDatabase.Get(0x24)
+        };
+
+        var report = DumpParser.BuildReportMarkdown(result);
+
+        Assert.Contains("转储直接指向 vendorstorage.sys", report);
+        Assert.Contains("## 执行前注意", report);
+        Assert.Contains("## 如何验证是否修复", report);
+        Assert.Contains("备份", report);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_tempDirectory))

@@ -121,7 +121,23 @@
                     </StackPanel>
                     <StackPanel>
                         <TextBlock FontWeight="SemiBold" Text="解决方案（按优先级）" />
+                        <TextBlock Text="建议一次只执行一个步骤，并在每一步后按下方方法验证，避免同时修改过多配置。"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   TextWrapping="Wrap" Margin="0,4,0,0" />
                         <ItemsControl x:Name="SolutionsList" Margin="0,6,0,0" />
+                    </StackPanel>
+                    <InfoBar x:Name="SafetyInfoBar"
+                             IsOpen="False"
+                             IsClosable="False"
+                             Severity="Warning"
+                             Title="执行前注意">
+                        <InfoBar.Content>
+                            <ItemsControl x:Name="SafetyNotesList" Margin="0,4,0,0" />
+                        </InfoBar.Content>
+                    </InfoBar>
+                    <StackPanel x:Name="VerificationSection" Visibility="Collapsed">
+                        <TextBlock FontWeight="SemiBold" Text="如何验证是否修复" />
+                        <ItemsControl x:Name="VerificationList" Margin="0,6,0,0" />
                     </StackPanel>
                 </StackPanel>
             </Expander>

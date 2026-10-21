@@ -32,7 +32,7 @@
 - **MDMP（Minidump）**：`MDMP` 签名的用户态小转储，含异常信息、模块列表、线程栈
 - **内核转储（PAGE 格式）**：Windows 蓝屏生成的 `PAGE`/`DU64` 头部转储，支持全部类型（1/5 完整内存、2/6 内核内存、3 仅头部、4 Triage、7 自动）
 - 解析 `DUMP_HEADER64` 头部：BugCheckCode、4 个参数、机器类型、系统版本（内部版本号）、DumpType、SystemTime、Comment
-- 内置 **BugCheck 知识库**（数百个错误代码），错误码 → 名称 / 类别 / 原因 / 解决方案
+- 内置 **BugCheck 知识库**，错误码 → 名称 / 类别 / 原因 / 分层解决方案 / 风险提示 / 修复验证
 - 崩溃参数按错误码**逐位注解**（WinDbg `!analyze -v` 风格）
 - 字节级解析验证与 WinDbg 头部数据同源，**无需安装 WinDbg / dbgeng.dll**
 
@@ -157,14 +157,14 @@ dotnet publish BlueScreenHelper/BlueScreenHelper.csproj `
 ### 制作安装包
 
 ```powershell
-# 1. 发布（同上）
-# 2. 安装 Inno Setup 6 后用 ISCC 编译
-$iscc = Get-ChildItem "C:\Program Files*\Inno Setup*\ISCC.exe" -Recurse |
-  Select-Object -First 1 -ExpandProperty FullName
-& $iscc installer\installer.iss
+# 安装 Inno Setup 6 后，一键还原、发布并编译安装包
+.\scripts\Build-Installer.ps1
+
+# 已经完成相同 RuntimeIdentifier 的 restore 时可跳过还原
+.\scripts\Build-Installer.ps1 -SkipRestore
 ```
 
-产物位于 `dist/BlueScreenHelper_Setup_<版本>_win-x64.exe`。
+脚本会校验项目与应用清单版本、生成自包含 x64 发布、补齐 VC++ 运行库、自动定位 `ISCC.exe`，并在完成后打印安装包路径、大小和 SHA-256。产物位于 `dist/BlueScreenHelper_Setup_<版本>_win-x64.exe`。
 
 ### GitHub Actions 自动打包
 
@@ -176,6 +176,7 @@ $iscc = Get-ChildItem "C:\Program Files*\Inno Setup*\ISCC.exe" -Recurse |
 
 - 转储解析为**自研二进制解析**，不依赖 WinDbg / dbgeng.dll
 - 内核转储（Triage 类型）不包含模块列表，此时故障驱动模块字段为空，属正常现象
+- 知识库方案按风险和证据排序；一次只执行一个步骤，并在每一步后按“如何验证是否修复”复核。磁盘写入、Driver Verifier、BIOS/固件等高风险操作会单独提示备份和恢复条件
 - 扫描仅**读取**系统信息与事件日志，不做任何修改
 - AI 密钥仅保存在本机 `%LOCALAPPDATA%\BlueScreenHelper\settings.json`，不上传；请勿将 settings.json 提交到版本库
 

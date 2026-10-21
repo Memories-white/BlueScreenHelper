@@ -64,6 +64,12 @@ public sealed partial class DumpPage : Page
         KnowledgeExpander.IsExpanded = false;
         ModulesExpander.IsExpanded = false;
         ModulesList.ItemsSource = null;
+        CausesList.ItemsSource = null;
+        SolutionsList.ItemsSource = null;
+        SafetyNotesList.ItemsSource = null;
+        VerificationList.ItemsSource = null;
+        SafetyInfoBar.IsOpen = false;
+        VerificationSection.Visibility = Visibility.Collapsed;
         AiButton.IsEnabled = false;
         CopyButton.IsEnabled = false;
         PickButton.IsEnabled = false;
@@ -147,17 +153,43 @@ public sealed partial class DumpPage : Page
         if (r.Knowledge != null)
         {
             DescText.Text = r.Knowledge.Description;
-            CausesList.ItemsSource = r.Knowledge.Causes.Select(c => (object)new TextBlock { Text = $"• {c}", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0) });
-            SolutionsList.ItemsSource = r.Knowledge.Solutions.Select((s, i) => (object)new TextBlock { Text = $"{i + 1}. {s}", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0) });
+            CausesList.ItemsSource = CreateListItems(r.Knowledge.Causes, "• ");
+            SolutionsList.ItemsSource = CreateNumberedItems(
+                BugCheckDatabase.BuildPrioritizedSolutions(r.Knowledge, r.FaultingModule));
+            SafetyNotesList.ItemsSource = CreateListItems(r.Knowledge.SafetyNotes, "• ");
+            SafetyInfoBar.IsOpen = r.Knowledge.SafetyNotes.Length > 0;
+            VerificationList.ItemsSource = CreateNumberedItems(r.Knowledge.VerificationSteps);
+            VerificationSection.Visibility = r.Knowledge.VerificationSteps.Length > 0
+                ? Visibility.Visible
+                : Visibility.Collapsed;
             KnowledgeExpander.Visibility = Visibility.Visible;
             KnowledgeExpander.IsExpanded = true;
         }
         else
         {
-            DescText.Text = "知识库中未收录该错误代码。\n建议使用“AI 智能诊断”获取针对性的分析，或按通用方案排查：更新驱动、检查内存、检查磁盘。";
-            CausesList.ItemsSource = null;
-            SolutionsList.ItemsSource = null;
+            DescText.Text = "知识库中尚未收录该错误代码。下面提供的是通用、低风险的排查顺序；它不能替代针对错误参数和故障模块的判断。";
+            CausesList.ItemsSource = CreateListItems(new[]
+            {
+                "新版本或较少见的驱动、硬件或系统错误",
+                "转储信息不足，无法仅凭错误代码确定根因"
+            }, "• ");
+            SolutionsList.ItemsSource = CreateNumberedItems(
+                BugCheckDatabase.BuildGeneralSolutions(r.FaultingModule));
+            SafetyNotesList.ItemsSource = CreateListItems(new[]
+            {
+                "不要根据单次蓝屏就批量卸载驱动或修改 BIOS；先保留转储并观察是否复现。",
+                "涉及磁盘修复、固件更新或硬件拆装前，请先备份重要数据并准备恢复方式。"
+            }, "• ");
+            SafetyInfoBar.IsOpen = true;
+            VerificationList.ItemsSource = CreateNumberedItems(new[]
+            {
+                "重启后按原使用场景观察，确认问题是否在相同操作下复现。",
+                "检查事件查看器和 C:\\Windows\\Minidump，确认没有生成新的同类崩溃记录。",
+                "若再次蓝屏，比较新的错误代码、参数和故障模块，再决定下一步。"
+            });
+            VerificationSection.Visibility = Visibility.Visible;
             KnowledgeExpander.Visibility = Visibility.Visible;
+            KnowledgeExpander.IsExpanded = true;
         }
 
         if (r.Modules.Count > 0)
@@ -165,6 +197,26 @@ public sealed partial class DumpPage : Page
             ModulesList.ItemsSource = r.Modules;
             ModulesExpander.Visibility = Visibility.Visible;
         }
+    }
+
+    private static IEnumerable<object> CreateListItems(IEnumerable<string> items, string prefix)
+    {
+        return items.Select(item => (object)new TextBlock
+        {
+            Text = $"{prefix}{item}",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 2, 0, 0)
+        }).ToArray();
+    }
+
+    private static IEnumerable<object> CreateNumberedItems(IEnumerable<string> items)
+    {
+        return items.Select((item, index) => (object)new TextBlock
+        {
+            Text = $"{index + 1}. {item}",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 2, 0, 0)
+        }).ToArray();
     }
 
     private void Page_DragOver(object sender, DragEventArgs e)
@@ -244,7 +296,8 @@ public sealed partial class DumpPage : Page
             UserMessage = DumpParser.BuildAnalysisText(_result),
             SystemPrompt = "你是一位经验丰富的 Windows 蓝屏(BSOD)诊断专家。用户会提供 .dmp 转储文件的解析数据。" +
                            "请按以下结构用中文回答：\n1. 问题定位（最可能的故障原因）\n2. 详细分析（结合错误代码与参数）\n" +
-                           "3. 解决方案（按优先级列出可操作步骤，包含具体命令或工具）\n4. 预防建议\n若信息不足，请明确指出还需补充什么。"
+                           "3. 解决方案（按优先级列出可操作步骤，包含具体命令或工具）\n4. 修复验证\n5. 预防建议\n" +
+                           "请明确区分转储证据、合理推断和未知信息；优先给出可逆、低风险步骤。涉及磁盘写入、驱动验证器、BIOS/固件、注册表或硬件拆装时，必须说明备份、恢复和停止条件。若信息不足，请明确指出还需补充什么。"
         };
         App.MainWindow?.NavigateTo("ai");
     }

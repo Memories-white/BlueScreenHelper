@@ -18,19 +18,40 @@ public static class SystemScanner
         };
         var issues = report.Issues;
 
-        ScanBugChecks(issues);
-        ScanUnexpectedShutdowns(issues);
-        ScanWheaErrors(issues);
-        ScanDiskErrors(issues);
-        ScanMemoryDiagnostics(issues);
-        ScanDumpFiles(issues);
-        ScanDriverLoadFailures(issues);
-        ScanSmartStatus(issues);
-        ScanLogicalDisks(issues);
-        ScanApplicationErrors(issues);
-        ScanPendingReboot(issues);
+        RunScanStep(issues, "蓝屏事件记录", ScanBugChecks);
+        RunScanStep(issues, "意外关机记录", ScanUnexpectedShutdowns);
+        RunScanStep(issues, "WHEA 硬件错误", ScanWheaErrors);
+        RunScanStep(issues, "磁盘事件记录", ScanDiskErrors);
+        RunScanStep(issues, "内存诊断记录", ScanMemoryDiagnostics);
+        RunScanStep(issues, "崩溃转储文件", ScanDumpFiles);
+        RunScanStep(issues, "驱动加载记录", ScanDriverLoadFailures);
+        RunScanStep(issues, "SMART 磁盘状态", ScanSmartStatus);
+        RunScanStep(issues, "磁盘空间", ScanLogicalDisks);
+        RunScanStep(issues, "应用程序崩溃记录", ScanApplicationErrors);
+        RunScanStep(issues, "待重启状态", ScanPendingReboot);
 
         return report;
+    }
+
+    private static void RunScanStep(
+        List<ScanIssue> issues, string displayName, Action<List<ScanIssue>> scan)
+    {
+        try
+        {
+            scan(issues);
+        }
+        catch (Exception ex)
+        {
+            AppLogger.LogError($"系统扫描步骤失败: {displayName}", ex);
+            issues.Add(new ScanIssue
+            {
+                Category = "扫描状态",
+                Title = $"{displayName}未能完成",
+                Severity = IssueSeverity.Info,
+                Description = $"该检查发生错误，但其余扫描仍会继续。错误：{ex.Message}",
+                Recommendation = "可尝试以管理员身份重新运行；若仍失败，请查看应用日志中的详细错误。"
+            });
+        }
     }
 
     public static SystemSnapshot GetSystemSnapshot()
@@ -142,6 +163,30 @@ public static class SystemScanner
         foreach (var (code, codeHex, name, time, driver) in bugChecks.Take(5))
         {
             var entry = BugCheckDatabase.Get(code);
+            var solutions = entry != null
+                ? BugCheckDatabase.BuildPrioritizedSolutions(entry, driver)
+                : BugCheckDatabase.BuildGeneralSolutions(driver);
+            var recommendation = new StringBuilder();
+            foreach (var (solution, index) in solutions.Select((value, index) => (value, index)))
+            {
+                recommendation.AppendLine($"{index + 1}. {solution}");
+            }
+            if (entry?.SafetyNotes.Length > 0)
+            {
+                recommendation.AppendLine().AppendLine("执行前注意：");
+                foreach (var note in entry.SafetyNotes)
+                {
+                    recommendation.AppendLine($"• {note}");
+                }
+            }
+            if (entry?.VerificationSteps.Length > 0)
+            {
+                recommendation.AppendLine().AppendLine("修复后验证：");
+                foreach (var (step, index) in entry.VerificationSteps.Select((value, index) => (value, index)))
+                {
+                    recommendation.AppendLine($"{index + 1}. {step}");
+                }
+            }
             issues.Add(new ScanIssue
             {
                 Category = "崩溃记录",
@@ -150,7 +195,7 @@ public static class SystemScanner
                 DetectedAt = time,
                 Description = $"崩溃时间：{time:yyyy-MM-dd HH:mm:ss}{(driver != null ? $"\n转储报告中涉及的驱动：{driver}" : "")}\n{entry?.Description ?? "知识库未收录该错误代码。"}",
                 Detail = BuildBugCheckDetail(bugChecks),
-                Recommendation = string.Join("\n", entry?.Solutions ?? new[] { "使用转储分析功能解析 .dmp 文件，或使用 AI 诊断获取详细方案。" })
+                Recommendation = recommendation.ToString().TrimEnd()
             });
         }
 
@@ -305,6 +350,7 @@ public static class SystemScanner
     private static void ScanDumpFiles(List<ScanIssue> issues)
     {
         var files = new List<(string Path, DateTime Time, long Size)>();
+        string? readError = null;
         try
         {
             var minidump = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Minidump");
@@ -323,13 +369,27 @@ public static class SystemScanner
                 files.Add((memDump, fi.LastWriteTime, fi.Length));
             }
         }
-        catch
+        catch (Exception ex)
         {
+            AppLogger.LogError("枚举崩溃转储文件失败", ex);
+            readError = ex.Message;
         }
 
         files = files.OrderByDescending(f => f.Time).ToList();
         if (files.Count == 0)
         {
+            if (readError != null)
+            {
+                issues.Add(new ScanIssue
+                {
+                    Category = "转储文件",
+                    Title = "无法完整读取崩溃转储目录",
+                    Severity = IssueSeverity.Info,
+                    Description = $"未能完成转储文件枚举，不能据此判断系统是否存在转储。错误：{readError}",
+                    Recommendation = "请尝试以管理员身份运行本程序，或手动检查 C:\\Windows\\Minidump 与 C:\\Windows\\MEMORY.DMP。"
+                });
+                return;
+            }
             issues.Add(new ScanIssue
             {
                 Category = "转储文件",

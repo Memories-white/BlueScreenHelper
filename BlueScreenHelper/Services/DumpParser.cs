@@ -43,16 +43,15 @@ public static class DumpParser
     private static readonly Dictionary<uint, string[]> BugCheckParamMeanings = new()
     {
         [0xD1] = new[] { "memory referenced（被引用的内存地址）", "IRQL（中断请求级别，0xFF=最高级别）", "value 0 = read, 1 = write, 8 = execute", "address which referenced memory（执行引用的指令地址）" },
-        [0x0A] = new[] { "IRQL（中断请求级别）", "value 0 = read, 1 = write, 8 = execute", "address which referenced memory", "referencing module（引用内存的模块）" },
+        [0x0A] = new[] { "memory referenced（被引用的内存地址）", "IRQL（中断请求级别）", "value 0 = read, 1 = write, 8 = execute", "address which referenced memory（执行引用的指令地址）" },
         [0x1E] = new[] { "exception code（异常代码）", "faulting address（出错地址）", "exception parameter 0", "exception parameter 1" },
         [0x3B] = new[] { "exception code（异常代码）", "faulting address（出错地址）", "exception parameter 0", "exception parameter 1" },
-        [0x133] = new[] { "reserved", "reserved", "context（附加上下文）", "reserved" },
-        [0x139] = new[] { "reserved", "reserved", "context（附加上下文）", "reserved" },
-        [0x116] = new[] { "reset reason（重置原因）", "TDR flag", "context（附加上下文）", "reserved" },
-        [0x119] = new[] { "context（附加上下文）", "video TDR context", "TDR flag", "reserved" },
-        [0xC2] = new[] { "request type（请求类型）", "memory descriptor list", "memory descriptor list", "reserved" },
-        [0x1A] = new[] { "memory management error code（错误代码）", "reserved", "reserved", "reserved" },
-        [0xA1] = new[] { "disk signature（磁盘签名）", "disk dump version", "size of dump", "reserved" }
+        [0x133] = new[] { "watchdog type（0=单个 DPC/ISR 超时，1=累计运行超时）", "timeout data（含义取决于参数 1）", "triage block or DPC context（含义取决于参数 1）", "reserved" },
+        [0x139] = new[] { "fast-fail type（安全检查失败类型）", "trap frame（陷阱帧地址）", "exception record（异常记录地址）", "reserved" },
+        [0x116] = new[] { "TDR recovery context（内部恢复上下文）", "responsible driver module（疑似责任驱动模块）", "last failed operation status（失败操作的 NTSTATUS）", "context-dependent data（上下文数据）" },
+        [0x119] = new[] { "video scheduler violation type（视频调度器违规类型）", "context-dependent data 1", "context-dependent data 2", "context-dependent data 3" },
+        [0xC2] = new[] { "pool operation type（内存池操作类型）", "context-dependent data 1", "context-dependent data 2", "context-dependent data 3" },
+        [0x1A] = new[] { "memory management subtype（内存管理错误子类型）", "context-dependent data 1", "context-dependent data 2", "context-dependent data 3" }
     };
 
     public static DumpAnalysisResult Parse(string path)
@@ -549,7 +548,7 @@ public static class DumpParser
     public static string BuildReportMarkdown(DumpAnalysisResult r)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("# 蓝屏转储分析报告");
+        sb.AppendLine(r.BugCheckCode > 0 ? "# 蓝屏转储分析报告" : "# 应用程序崩溃转储分析报告");
         sb.AppendLine();
         sb.AppendLine($"- **文件**：{r.FilePath}");
         sb.AppendLine($"- **文件大小**：{FormatSize(r.FileSize)}");
@@ -563,6 +562,14 @@ public static class DumpParser
         }
         sb.AppendLine($"- **转储类型**：{r.DumpTypeText}");
         sb.AppendLine();
+        if (!r.IsValidMinidump)
+        {
+            sb.AppendLine("## 解析结果");
+            sb.AppendLine();
+            sb.AppendLine(string.IsNullOrWhiteSpace(r.Error) ? "无法解析该转储文件。" : r.Error);
+            sb.AppendLine();
+            return sb.ToString();
+        }
         if (r.BugCheckCode > 0)
         {
             sb.AppendLine($"## 崩溃信息");
@@ -589,6 +596,29 @@ public static class DumpParser
             }
             sb.AppendLine();
         }
+        else if (r.ExceptionCode is uint exceptionCode)
+        {
+            sb.AppendLine("## 异常信息");
+            sb.AppendLine();
+            sb.AppendLine($"- **异常代码**：0x{exceptionCode:X8}");
+            if (r.ExceptionAddress is ulong address)
+            {
+                sb.AppendLine($"- **异常地址**：0x{address:X}");
+            }
+            if (!string.IsNullOrWhiteSpace(r.FaultingModule))
+            {
+                sb.AppendLine($"- **故障模块**：{r.FaultingModule}");
+            }
+            if (r.ProcessId is uint processId)
+            {
+                sb.AppendLine($"- **进程 ID**：{processId}");
+            }
+            if (r.ThreadId is uint threadId)
+            {
+                sb.AppendLine($"- **线程 ID**：{threadId}");
+            }
+            sb.AppendLine();
+        }
         if (r.Knowledge != null)
         {
             sb.AppendLine($"## 问题描述");
@@ -605,12 +635,34 @@ public static class DumpParser
             sb.AppendLine("## 解决方案");
             sb.AppendLine();
             int n = 1;
-            foreach (var s in r.Knowledge.Solutions)
+            foreach (var s in BugCheckDatabase.BuildPrioritizedSolutions(r.Knowledge, r.FaultingModule))
             {
                 sb.AppendLine($"{n}. {s}");
                 n++;
             }
             sb.AppendLine();
+            if (r.Knowledge.SafetyNotes.Length > 0)
+            {
+                sb.AppendLine("## 执行前注意");
+                sb.AppendLine();
+                foreach (var note in r.Knowledge.SafetyNotes)
+                {
+                    sb.AppendLine($"- {note}");
+                }
+                sb.AppendLine();
+            }
+            if (r.Knowledge.VerificationSteps.Length > 0)
+            {
+                sb.AppendLine("## 如何验证是否修复");
+                sb.AppendLine();
+                n = 1;
+                foreach (var step in r.Knowledge.VerificationSteps)
+                {
+                    sb.AppendLine($"{n}. {step}");
+                    n++;
+                }
+                sb.AppendLine();
+            }
             if (r.Knowledge.RelatedDrivers.Length > 0)
             {
                 sb.AppendLine("## 相关驱动");
