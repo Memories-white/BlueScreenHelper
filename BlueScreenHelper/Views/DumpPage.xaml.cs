@@ -4,7 +4,6 @@ using BlueScreenHelper.Services;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
 using Microsoft.Windows.Storage.Pickers;
 using Windows.Storage;
 
@@ -64,10 +63,10 @@ public sealed partial class DumpPage : Page
         KnowledgeExpander.IsExpanded = false;
         ModulesExpander.IsExpanded = false;
         ModulesList.ItemsSource = null;
-        CausesList.ItemsSource = null;
-        SolutionsList.ItemsSource = null;
-        SafetyNotesList.ItemsSource = null;
-        VerificationList.ItemsSource = null;
+        CausesList.Children.Clear();
+        SolutionsList.Children.Clear();
+        SafetyNotesList.Children.Clear();
+        VerificationList.Children.Clear();
         SafetyInfoBar.IsOpen = false;
         VerificationSection.Visibility = Visibility.Collapsed;
         AiButton.IsEnabled = false;
@@ -153,12 +152,14 @@ public sealed partial class DumpPage : Page
         if (r.Knowledge != null)
         {
             DescText.Text = r.Knowledge.Description;
-            CausesList.ItemsSource = CreateListItems(r.Knowledge.Causes, "• ");
-            SolutionsList.ItemsSource = CreateNumberedItems(
-                BugCheckDatabase.BuildPrioritizedSolutions(r.Knowledge, r.FaultingModule));
-            SafetyNotesList.ItemsSource = CreateListItems(r.Knowledge.SafetyNotes, "• ");
+            PopulateGuidanceList(CausesList, r.Knowledge.Causes);
+            PopulateGuidanceList(
+                SolutionsList,
+                BugCheckDatabase.BuildPrioritizedSolutions(r.Knowledge, r.FaultingModule),
+                numbered: true);
+            PopulateGuidanceList(SafetyNotesList, r.Knowledge.SafetyNotes);
             SafetyInfoBar.IsOpen = r.Knowledge.SafetyNotes.Length > 0;
-            VerificationList.ItemsSource = CreateNumberedItems(r.Knowledge.VerificationSteps);
+            PopulateGuidanceList(VerificationList, r.Knowledge.VerificationSteps, numbered: true);
             VerificationSection.Visibility = r.Knowledge.VerificationSteps.Length > 0
                 ? Visibility.Visible
                 : Visibility.Collapsed;
@@ -168,25 +169,27 @@ public sealed partial class DumpPage : Page
         else
         {
             DescText.Text = "知识库中尚未收录该错误代码。下面提供的是通用、低风险的排查顺序；它不能替代针对错误参数和故障模块的判断。";
-            CausesList.ItemsSource = CreateListItems(new[]
+            PopulateGuidanceList(CausesList, new[]
             {
                 "新版本或较少见的驱动、硬件或系统错误",
                 "转储信息不足，无法仅凭错误代码确定根因"
-            }, "• ");
-            SolutionsList.ItemsSource = CreateNumberedItems(
-                BugCheckDatabase.BuildGeneralSolutions(r.FaultingModule));
-            SafetyNotesList.ItemsSource = CreateListItems(new[]
+            });
+            PopulateGuidanceList(
+                SolutionsList,
+                BugCheckDatabase.BuildGeneralSolutions(r.FaultingModule),
+                numbered: true);
+            PopulateGuidanceList(SafetyNotesList, new[]
             {
                 "不要根据单次蓝屏就批量卸载驱动或修改 BIOS；先保留转储并观察是否复现。",
                 "涉及磁盘修复、固件更新或硬件拆装前，请先备份重要数据并准备恢复方式。"
-            }, "• ");
+            });
             SafetyInfoBar.IsOpen = true;
-            VerificationList.ItemsSource = CreateNumberedItems(new[]
+            PopulateGuidanceList(VerificationList, new[]
             {
                 "重启后按原使用场景观察，确认问题是否在相同操作下复现。",
                 "检查事件查看器和 C:\\Windows\\Minidump，确认没有生成新的同类崩溃记录。",
                 "若再次蓝屏，比较新的错误代码、参数和故障模块，再决定下一步。"
-            });
+            }, numbered: true);
             VerificationSection.Visibility = Visibility.Visible;
             KnowledgeExpander.Visibility = Visibility.Visible;
             KnowledgeExpander.IsExpanded = true;
@@ -199,24 +202,46 @@ public sealed partial class DumpPage : Page
         }
     }
 
-    private static IEnumerable<object> CreateListItems(IEnumerable<string> items, string prefix)
+    private static void PopulateGuidanceList(
+        StackPanel target,
+        IEnumerable<string> items,
+        bool numbered = false)
     {
-        return items.Select(item => (object)new TextBlock
+        target.Children.Clear();
+        var index = 0;
+        foreach (var item in items)
         {
-            Text = $"{prefix}{item}",
-            TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(0, 2, 0, 0)
-        }).ToArray();
-    }
+            if (string.IsNullOrWhiteSpace(item))
+            {
+                continue;
+            }
 
-    private static IEnumerable<object> CreateNumberedItems(IEnumerable<string> items)
-    {
-        return items.Select((item, index) => (object)new TextBlock
-        {
-            Text = $"{index + 1}. {item}",
-            TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(0, 2, 0, 0)
-        }).ToArray();
+            index++;
+            var row = new Grid
+            {
+                ColumnSpacing = 8,
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var marker = new TextBlock
+            {
+                Text = numbered ? $"{index}." : "•",
+                Opacity = 0.72,
+                VerticalAlignment = VerticalAlignment.Top
+            };
+            var content = new TextBlock
+            {
+                Text = item.Trim(),
+                TextWrapping = TextWrapping.Wrap,
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+            Grid.SetColumn(content, 1);
+            row.Children.Add(marker);
+            row.Children.Add(content);
+            target.Children.Add(row);
+        }
     }
 
     private void Page_DragOver(object sender, DragEventArgs e)

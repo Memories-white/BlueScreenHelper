@@ -15,10 +15,17 @@
             <Setter Property="CornerRadius" Value="8" />
             <Setter Property="Padding" Value="16" />
         </Style>
+        <Style x:Key="StretchExpanderStyle" TargetType="Expander">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        </Style>
     </Page.Resources>
 
-    <ScrollViewer>
-        <StackPanel Padding="24,16,24,24" Spacing="14">
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                  HorizontalContentAlignment="Stretch">
+        <StackPanel Padding="24,16,24,24"
+                    Spacing="14"
+                    HorizontalAlignment="Stretch">
 
             <TextBlock Text="转储文件分析" FontSize="28" FontWeight="Bold" />
             <TextBlock Text="选择 Windows 崩溃转储文件（.dmp，通常位于 C:\Windows\Minidump），解析错误代码、故障模块并给出解决方案。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
@@ -97,7 +104,9 @@
                 </StackPanel>
             </Border>
 
-            <Expander x:Name="ParamsExpander" Visibility="Collapsed" HorizontalAlignment="Stretch">
+            <Expander x:Name="ParamsExpander"
+                      Visibility="Collapsed"
+                      Style="{StaticResource StretchExpanderStyle}">
                 <Expander.Header>
                     <TextBlock Text="崩溃参数 (BugCheck Parameters)" FontWeight="SemiBold" />
                 </Expander.Header>
@@ -106,43 +115,63 @@
                 </StackPanel>
             </Expander>
 
-            <Expander x:Name="KnowledgeExpander" Visibility="Collapsed" HorizontalAlignment="Stretch">
+            <Expander x:Name="KnowledgeExpander"
+                      Visibility="Collapsed"
+                      Style="{StaticResource StretchExpanderStyle}">
                 <Expander.Header>
                     <TextBlock Text="问题定位与解决方案" FontWeight="SemiBold" />
                 </Expander.Header>
-                <StackPanel Spacing="12">
-                    <StackPanel>
+                <StackPanel Spacing="14" HorizontalAlignment="Stretch">
+                    <StackPanel HorizontalAlignment="Stretch">
                         <TextBlock FontWeight="SemiBold" Text="问题描述" />
                         <TextBlock x:Name="DescText" TextWrapping="Wrap" Margin="0,6,0,0" />
                     </StackPanel>
-                    <StackPanel>
+                    <StackPanel HorizontalAlignment="Stretch">
                         <TextBlock FontWeight="SemiBold" Text="常见原因" />
-                        <ItemsControl x:Name="CausesList" Margin="0,6,0,0" />
+                        <StackPanel x:Name="CausesList"
+                                    Margin="0,6,0,0"
+                                    Spacing="6"
+                                    HorizontalAlignment="Stretch" />
                     </StackPanel>
-                    <StackPanel>
+                    <StackPanel HorizontalAlignment="Stretch">
                         <TextBlock FontWeight="SemiBold" Text="解决方案（按优先级）" />
                         <TextBlock Text="建议一次只执行一个步骤，并在每一步后按下方方法验证，避免同时修改过多配置。"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                    TextWrapping="Wrap" Margin="0,4,0,0" />
-                        <ItemsControl x:Name="SolutionsList" Margin="0,6,0,0" />
+                        <StackPanel x:Name="SolutionsList"
+                                    Margin="0,8,0,0"
+                                    Spacing="8"
+                                    HorizontalAlignment="Stretch" />
                     </StackPanel>
                     <InfoBar x:Name="SafetyInfoBar"
                              IsOpen="False"
                              IsClosable="False"
                              Severity="Warning"
+                             HorizontalAlignment="Stretch"
+                             HorizontalContentAlignment="Stretch"
                              Title="执行前注意">
                         <InfoBar.Content>
-                            <ItemsControl x:Name="SafetyNotesList" Margin="0,4,0,0" />
+                            <StackPanel x:Name="SafetyNotesList"
+                                        Margin="0,4,0,0"
+                                        Spacing="6"
+                                        HorizontalAlignment="Stretch" />
                         </InfoBar.Content>
                     </InfoBar>
-                    <StackPanel x:Name="VerificationSection" Visibility="Collapsed">
+                    <StackPanel x:Name="VerificationSection"
+                                Visibility="Collapsed"
+                                HorizontalAlignment="Stretch">
                         <TextBlock FontWeight="SemiBold" Text="如何验证是否修复" />
-                        <ItemsControl x:Name="VerificationList" Margin="0,6,0,0" />
+                        <StackPanel x:Name="VerificationList"
+                                    Margin="0,6,0,0"
+                                    Spacing="8"
+                                    HorizontalAlignment="Stretch" />
                     </StackPanel>
                 </StackPanel>
             </Expander>
 
-            <Expander x:Name="ModulesExpander" Visibility="Collapsed" HorizontalAlignment="Stretch">
+            <Expander x:Name="ModulesExpander"
+                      Visibility="Collapsed"
+                      Style="{StaticResource StretchExpanderStyle}">
                 <Expander.Header>
                     <TextBlock Text="已加载模块" FontWeight="SemiBold" />
                 </Expander.Header>
