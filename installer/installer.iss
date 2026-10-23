@@ -8,7 +8,7 @@
   #define MyAppNumericVersion "1.0.7.0"
 #endif
 #define MyAppExeName "BlueScreenHelper.exe"
-#define MyAppPublisher "Memories-white"
+#define MyAppPublisher "Memories_white"
 #define MyAppURL "https://github.com/Memories-white/BlueScreenHelper"
 #define SourceDir "..\publish\win-x64"
 #define OutputDir "..\dist"
@@ -28,7 +28,7 @@ AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
 AppContact={#MyAppURL}/issues
 AppComments=Windows 蓝屏转储分析与系统健康诊断工具
-AppCopyright=Copyright (C) Memories-white
+AppCopyright=Copyright (C) Memories_white
 DefaultDirName={autopf}\BlueScreenHelper
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes

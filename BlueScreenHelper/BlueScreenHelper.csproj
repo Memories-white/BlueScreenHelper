@@ -17,7 +17,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <Version>1.0.7</Version>
-    <Authors>Memories-white</Authors>
+    <Authors>Memories_white</Authors>
     <Product>BlueScreenHelper</Product>
     <Description>Windows 蓝屏转储分析与系统健康诊断工具</Description>
     <RepositoryUrl>https://github.com/Memories-white/BlueScreenHelper</RepositoryUrl>
